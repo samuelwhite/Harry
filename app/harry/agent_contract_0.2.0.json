@@ -1,0 +1,64 @@
+{
+  "schema_version": "0.2.0",
+  "contract_id": "harry_agent_contract",
+  "contract_version": "0.2.0",
+  "generated_by": "harry-brain",
+  "ts": "2026-02-26T00:00:00Z",
+
+  "required_top_level": ["schema_version", "node", "ts", "facts", "metrics", "derived", "advice"],
+
+  "defaults": {
+    "facts": { "disks": [], "gpus": [], "extensions": {} },
+    "metrics": { "disk_used": [], "gpu": [], "temps_c": {}, "extensions": {} },
+    "derived": { "health": { "state": "unknown", "worst_severity": "unknown", "reasons": [] }, "extensions": {} },
+    "advice": []
+  },
+
+  "field_rules": {
+    "naming": "snake_case",
+    "units": {
+      "temps_c": "celsius",
+      "ram_total_gb": "GB",
+      "ram_max_gb": "GB",
+      "cpu_load_1m": "float (load average)",
+      "mem_used_pct": "0..100",
+      "disk_used.used_pct": "0..100",
+      "gpu.util_pct": "0..100",
+      "gpu.vram_total_mb": "MB",
+      "gpu.vram_used_mb": "MB"
+    },
+    "optional_fields_ok": true,
+    "unknown_fields_policy": "put extras under *.extensions"
+  },
+
+  "extensions": {
+    "metrics.extensions.disk_physical": {
+      "type": "array",
+      "item_shape": { "name": "string", "used_pct": "number(0..100)", "size_gb": "number" },
+      "notes": "Prefer this for storage advice. Represents physical disks, not mounts."
+    }
+  },
+
+  "minimum_payload_template": {
+    "schema_version": "0.2.0",
+    "node": "REPLACE_ME",
+    "ts": "REPLACE_ME_UTC_ISO8601_Z",
+    "facts": {
+      "hostname": "REPLACE_ME",
+      "disks": [],
+      "gpus": [],
+      "extensions": {}
+    },
+    "metrics": {
+      "disk_used": [],
+      "gpu": [],
+      "temps_c": {},
+      "extensions": {}
+    },
+    "derived": {
+      "health": { "state": "unknown", "worst_severity": "unknown", "reasons": [] },
+      "extensions": {}
+    },
+    "advice": []
+  }
+}

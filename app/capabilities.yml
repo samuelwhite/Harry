@@ -1,0 +1,10 @@
+OptiPlex 3020:
+  max_ram_gb: 16
+  ram_slots: 2
+  ram_type: DDR3
+  psu_wattage: 290
+
+OptiPlex 5050 Tower:
+  max_ram_gb: 64
+  ram_slots: 4
+  ram_type: DDR4

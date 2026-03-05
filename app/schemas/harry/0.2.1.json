@@ -1,0 +1,510 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://whitefamilyhome.net/schemas/harry/0.2.1.json",
+  "title": "Harry Snapshot Schema v0.2.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "node",
+    "ts",
+    "facts",
+    "metrics",
+    "derived",
+    "advice"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.2.1"
+    },
+    "node": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "facts": {
+      "$ref": "#/$defs/facts"
+    },
+    "metrics": {
+      "$ref": "#/$defs/metrics"
+    },
+    "derived": {
+      "$ref": "#/$defs/derived"
+    },
+    "advice": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/advice_item"
+      },
+      "default": []
+    }
+  },
+  "$defs": {
+    "facts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hostname"
+      ],
+      "properties": {
+        "hostname": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpu": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpu_cores": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "ram_total_gb": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "ram_max_gb": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "ram_slots_total": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "ram_slots_used": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "ram_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bios_release_date": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "YYYY-MM-DD (local-derived), not a datetime."
+        },
+        "disks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/disk_fact"
+          },
+          "default": []
+        },
+        "gpus": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/gpu_fact"
+          },
+          "default": []
+        },
+        "extensions": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {},
+          "description": "Vendor/node-specific additions. Prefer namespaced keys."
+        }
+      }
+    },
+    "disk_fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "size_gb"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "size_gb": {
+          "type": "number",
+          "minimum": 0
+        },
+        "type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "hdd",
+            "ssd",
+            "nvme",
+            "usb",
+            "unknown",
+            null
+          ]
+        },
+        "serial": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "smart_power_on_hours": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "gpu_fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "vram_total_mb": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu_load_1m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "mem_used_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "disk_used": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/disk_usage"
+          },
+          "default": []
+        },
+        "temps_c": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "nvme": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "default": {}
+        },
+        "gpu": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/gpu_metrics"
+          },
+          "default": []
+        },
+        "extensions": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {},
+          "description": "Extra metrics (e.g., physical disk utilisation)."
+        }
+      },
+      "default": {}
+    },
+    "disk_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mount",
+        "used_pct"
+      ],
+      "properties": {
+        "mount": {
+          "type": "string",
+          "minLength": 1
+        },
+        "used_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "size_gb": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "gpu_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "temp_c": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "util_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "vram_used_mb": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "derived": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "health"
+      ],
+      "properties": {
+        "health": {
+          "$ref": "#/$defs/health"
+        },
+        "inventory_age_years_est": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "ts_human": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ts_relative": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "extensions": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {},
+          "description": "Computed extras (safe for UI)."
+        }
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "worst_severity",
+        "reasons"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "green",
+            "amber",
+            "red",
+            "unknown"
+          ]
+        },
+        "worst_severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warn",
+            "crit",
+            "unknown"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/health_reason"
+          },
+          "default": []
+        }
+      }
+    },
+    "health_reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "severity",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warn",
+            "crit"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "field": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {},
+        "evidence": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        }
+      }
+    },
+    "advice_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "node",
+        "category",
+        "severity",
+        "message",
+        "recommendation"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "node": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "storage",
+            "memory",
+            "cpu",
+            "temperature",
+            "gpu",
+            "network",
+            "other"
+          ]
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warn",
+            "crit"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recommendation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        }
+      }
+    }
+  }
+}

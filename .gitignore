@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.bak.*
+*.pre_css_fix.*
+*~
+backups/
+_private_backups/
+*.tgz
+*.tar.gz
+.env
