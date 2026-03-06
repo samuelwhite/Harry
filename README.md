@@ -3,7 +3,7 @@ Hardware awareness for small infrastructure environments.
 
 Experimental • Home Lab Tool • Quiet Infrastructure
 
-![Harry Dashboard](assets/harry_dashboard.png)
+![Harry Dashboard](assets/harry-dashboard.png)
 
 Harry is a lightweight hardware awareness layer for small multi-node home labs.
 
