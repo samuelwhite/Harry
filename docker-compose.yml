@@ -7,11 +7,12 @@ services:
     volumes:
       - harry_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health').read()\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://0.0.0.0:8787/health').read()\""]
       interval: 10s
       timeout: 3s
       retries: 10
     restart: unless-stopped
-
+    ports:
+      - "8787:8787"
 volumes:
   harry_data:
