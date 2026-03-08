@@ -3,6 +3,9 @@ Hardware awareness for small infrastructure environments.
 
 Experimental • Home Lab Tool • Quiet Infrastructure
 
+![Release](https://img.shields.io/github/v/release/samuelwhite/Harry)
+![Licence](https://img.shields.io/github/license/samuelwhite/Harry)
+
 ![Harry Dashboard](assets/harry-dashboard.png)
 
 Harry is a lightweight hardware awareness layer for small multi-node home labs.
@@ -18,6 +21,9 @@ If it runs quietly for years, we’ve won. **Boring is good.**
 ---
 
 ## Quick Start
+
+Latest release notes:
+https://github.com/samuelwhite/Harry/releases
 
 Clone and start the Brain:
 
@@ -68,6 +74,7 @@ curl -fsSL "$HARRY_BASE_URL/scripts/install-agent.sh" | sudo -E bash
 * store snapshots (SQLite)
 * serve a simple fleet overview UI
 * distribute a self-updating agent to nodes
+* track agent versions across the fleet
 * fail loudly on invalid payloads
 
 ## Harry does not
@@ -136,6 +143,8 @@ Endpoints:
 
 `/` — UI
 `/health` — health check
+`/doctor` — diagnostic report
+`/doctor.json` — machine diagnostics
 `/api` — API info
 `/ingest` — snapshot ingest
 `/schema/harry/{version}` — schema distribution
@@ -194,8 +203,8 @@ Example output:
 Doctor Harry
 ===========
 ok: True
-brain_version: 2026.03.05
-agent_version: 0.2.4
+brain_version: 2026.03.08
+agent_version: 0.2.3
 ```
 
 ---
