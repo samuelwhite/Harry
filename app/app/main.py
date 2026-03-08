@@ -15,17 +15,21 @@ from app.config import DATA_DIR, DB_PATH
 from app.harry_normalise import normalise_for_schema
 from app.harry_schema import validate_harry_snapshot
 from app.health import compute_health
+from app.versions import (
+    BRAIN_VERSION,
+    AGENT_VERSION,
+    SCHEMA_BEHIND_WARN_MIN,
+    SCHEMA_BEHIND_CRIT_MIN,
+)
 
 PKG_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = PKG_DIR.parent
 
 DIST_DIR = PROJECT_DIR / "dist"
 SCHEMA_DIR = PROJECT_DIR / "schemas"
+LOG_DIR = DATA_DIR / "logs"
 
-# Versions: single source of truth
-BRAIN_VERSION = "2026.03.1"  # brain patch release
-AGENT_VERSION = "0.2.3"      # dist agent release (stamped into dist)
-SCHEMA_CURRENT = "unknown"   # read at startup
+SCHEMA_CURRENT = "unknown"    # read at startup
 
 # Dist health (set at startup)
 DIST_OK: bool = True
@@ -35,6 +39,47 @@ app = FastAPI(title="harry-brain", version=BRAIN_VERSION)
 
 from app.ui import router as ui_router
 app.include_router(ui_router)
+
+
+def _iso_utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _ensure_log_dir() -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _touch_log_files() -> None:
+    _ensure_log_dir()
+    for name in ("brain.log", "ingest.log", "errors.log"):
+        try:
+            (LOG_DIR / name).touch(exist_ok=True)
+        except Exception:
+            pass
+
+
+def _write_log(filename: str, message: str) -> None:
+    try:
+        _ensure_log_dir()
+        ts = _iso_utc_now()
+        with (LOG_DIR / filename).open("a", encoding="utf-8") as fh:
+            fh.write(f"{ts} {message}\n")
+    except Exception:
+        # Never let logging break the app
+        pass
+
+
+def log_brain(message: str) -> None:
+    _write_log("brain.log", message)
+
+
+def log_ingest(message: str) -> None:
+    _write_log("ingest.log", message)
+
+
+def log_error(message: str) -> None:
+    _write_log("errors.log", message)
+
 
 def _db():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -96,17 +141,33 @@ def _validate_dist_agent(path: Path) -> Tuple[bool, str | None]:
 @app.on_event("startup")
 def _startup():
     global SCHEMA_CURRENT, DIST_OK, DIST_ERROR
-    _init_db()
-    SCHEMA_CURRENT = _load_current_schema_version()
+
+    _touch_log_files()
+    log_brain(f"startup begin brain_version={BRAIN_VERSION} agent_version={AGENT_VERSION}")
+
+    try:
+        _init_db()
+        log_brain(f"db_init ok path={DB_PATH}")
+    except Exception as e:
+        log_error(f"db_init_failed path={DB_PATH} error={e}")
+        raise
+
+    try:
+        SCHEMA_CURRENT = _load_current_schema_version()
+        log_brain(f"schema_current={SCHEMA_CURRENT}")
+    except Exception as e:
+        SCHEMA_CURRENT = "unknown"
+        log_error(f"schema_load_failed error={e}")
 
     dist_path = DIST_DIR / "harry_agent.sh"
     ok, err = _validate_dist_agent(dist_path)
     DIST_OK = ok
     DIST_ERROR = err
 
-
-def _iso_utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if DIST_OK:
+        log_brain(f"dist_check ok path={dist_path}")
+    else:
+        log_error(f"dist_check_failed path={dist_path} error={DIST_ERROR or 'unknown'}")
 
 
 def _find_schema_file(version: str) -> Path | None:
@@ -205,7 +266,8 @@ def _fetch_latest_payloads(limit_nodes: int = 200) -> List[Dict[str, Any]]:
         cur = conn.execute(q, (int(limit_nodes),))
         rows = cur.fetchall()
         conn.close()
-    except Exception:
+    except Exception as e:
+        log_error(f"fetch_latest_payloads_failed limit_nodes={limit_nodes} error={e}")
         return out
 
     for row in rows:
@@ -259,8 +321,8 @@ def _doctor_json() -> Dict[str, Any]:
     # Compute health per node
     ctx = {
         "schema_current": SCHEMA_CURRENT,
-        "schema_behind_warn_min": 15,
-        "schema_behind_crit_min": 60,
+        "schema_behind_warn_min": SCHEMA_BEHIND_WARN_MIN,
+        "schema_behind_crit_min": SCHEMA_BEHIND_CRIT_MIN,
     }
 
     nodes: List[Dict[str, Any]] = []
@@ -273,14 +335,12 @@ def _doctor_json() -> Dict[str, Any]:
         except Exception as e:
             h = {"state": "critical", "score": 0, "reasons": [f"health_exception: {e}"]}
 
-        # normalise
         state = str(h.get("state") or "healthy")
         try:
             score = int(h.get("score") or 0)
         except Exception:
             score = 0
 
-        # Aggregate worst state
         if state == "critical":
             worst_state = "critical"
         elif state == "warning" and worst_state != "critical":
@@ -297,16 +357,11 @@ def _doctor_json() -> Dict[str, Any]:
             }
         )
 
-    # Sort nodes worst-first (lowest score)
     nodes_sorted = sorted(
         nodes,
         key=lambda x: int(((x.get("health") or {}).get("score") or 0)),
     )
 
-    # Overall ok policy:
-    # - dist must be ok
-    # - db must be ok
-    # - fleet worst state must not be critical
     overall_ok = bool(DIST_OK) and bool(db_ok) and worst_state != "critical"
 
     base.update(
@@ -375,17 +430,28 @@ def doctor():
 async def ingest(req: Request):
     body = await req.body()
     if not body or not body.strip():
+        log_error("ingest_invalid_json reason=empty_body")
         return JSONResponse(status_code=400, content={"ok": False, "error": "invalid_json"})
 
     try:
         payload = json.loads(body)
-    except Exception:
+    except Exception as e:
+        log_error(f"ingest_invalid_json reason=parse_failed error={e}")
         return JSONResponse(status_code=400, content={"ok": False, "error": "invalid_json"})
 
-    payload = normalise_for_schema(payload, contract_version=SCHEMA_CURRENT)
+    try:
+        payload = normalise_for_schema(payload, contract_version=SCHEMA_CURRENT)
+    except Exception as e:
+        log_error(f"ingest_normalise_failed error={e}")
+        return JSONResponse(status_code=400, content={"ok": False, "error": "normalise_failed"})
 
     errors = validate_harry_snapshot(payload)
     if errors:
+        node_hint = payload.get("node") or payload.get("facts", {}).get("hostname") or "unknown"
+        log_error(
+            "ingest_schema_validation_failed "
+            f"node={node_hint} details={json.dumps(errors[:10], ensure_ascii=False)}"
+        )
         return JSONResponse(
             status_code=400,
             content={"ok": False, "error": "schema_validation_failed", "details": errors[:10]},
@@ -400,19 +466,22 @@ async def ingest(req: Request):
     node = payload.get("node") or payload.get("facts", {}).get("hostname") or "unknown"
     ts = payload.get("ts") or _iso_utc_now()
 
-    conn = _db()
-    conn.execute(
-        "INSERT INTO ingest(ts, node, payload) VALUES(?, ?, ?)",
-        (ts, node, json.dumps(payload, separators=(",", ":"), ensure_ascii=False)),
+    try:
+        conn = _db()
+        conn.execute(
+            "INSERT INTO ingest(ts, node, payload) VALUES(?, ?, ?)",
+            (ts, node, json.dumps(payload, separators=(",", ":"), ensure_ascii=False)),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log_error(f"ingest_db_insert_failed node={node} ts={ts} error={e}")
+        return JSONResponse(status_code=500, content={"ok": False, "error": "db_write_failed"})
+
+    log_ingest(
+        f"ingest_accepted node={node} ts={ts} "
+        f"agent_version={payload.get('agent_version', 'unknown')} "
+        f"schema_version={payload.get('schema_version', 'unknown')}"
     )
-    conn.commit()
-    conn.close()
 
     return {"ok": True, "node": node, "ts": ts}
-
-
-try:
-    from app.ui import router as ui_router
-    app.include_router(ui_router)
-except Exception as e:
-    print("UI failed to load:", e)

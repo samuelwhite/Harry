@@ -11,9 +11,12 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.rules import evaluate as rules_evaluate
+from app.health import compute_health
+from app.versions import BRAIN_VERSION, AGENT_VERSION
 
 # Prefer the newer advice engine if available
 try:
@@ -21,6 +24,10 @@ try:
 except Exception:  # pragma: no cover
     advice_build = None
 
+
+PKG_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = PKG_DIR.parent
+SCHEMA_CURRENT_FILE = PROJECT_DIR / "schemas" / "harry" / "current.json"
 
 # UI CSS extracted to avoid f-string brace issues
 CSS = """
@@ -143,6 +150,10 @@ a:hover { text-decoration: underline; }
 .title { display:flex; align-items:center; gap:10px; min-width: 0; }
 .nodename { font-size: 22px; font-weight: 900; }
 .model { font-size: 18px; font-weight: 700; color: rgba(255,255,255,0.70); }
+.nodever { margin-top: 4px; font-size: 10px; color: rgba(255,255,255,0.60); }
+.nodever.ok { color: rgba(255,255,255,0.68); }
+.nodever.behind { color: rgba(251,191,36,0.92); }
+.nodever.unknown { color: rgba(255,255,255,0.50); }
 .subtitle { margin-top: 4px; font-size: 12.5px; color: rgba(255,255,255,0.72); font-style: italic; }
 
 .pill {
@@ -385,6 +396,16 @@ table.inv { width:100%; border-collapse: collapse; }
   100% { filter: drop-shadow(0 0 0 rgba(255,255,255,0.0)); transform: scale(1); }
 }
 
+/* Footer versions */
+.footerline {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.68);
+  font-size: 12px;
+  text-align: center;
+}
+
 /* Make SVG links actually clickable */
 svg a { cursor: pointer; pointer-events: auto; }
 svg text { pointer-events: auto; }
@@ -393,10 +414,7 @@ svg text { pointer-events: auto; }
 # JS kept out of f-strings so braces don't explode
 JS_PULSE = r"""
 (() => {
-  // Poll /inventory for last_seen changes and animate corresponding SVG links/dots.
-  // No websockets; low-risk and still feels alive.
-
-  const POLL_MS = 9000;     // snappy but not silly
+  const POLL_MS = 9000;
   const MAX_ANIM_MS = 1200;
 
   let lastSeen = {};
@@ -452,7 +470,6 @@ JS_PULSE = r"""
       for (const node of changed) trigger(node);
 
     } catch (_) {
-      // swallow transient errors
     }
   }
 
@@ -543,7 +560,6 @@ def _html_escape(s: str) -> str:
 
 
 def _safe_dom_id(s: str) -> str:
-    # For ids used in SVG/HTML; must match JS safeId()
     out = []
     for ch in (s or ""):
         if ch.isalnum() or ch in ("-", "_"):
@@ -551,6 +567,16 @@ def _safe_dom_id(s: str) -> str:
         else:
             out.append("_")
     return "".join(out) or "node"
+
+
+def _load_schema_current() -> str:
+    try:
+        if not SCHEMA_CURRENT_FILE.exists() or not SCHEMA_CURRENT_FILE.is_file():
+            return "unknown"
+        data = json.loads(SCHEMA_CURRENT_FILE.read_text(encoding="utf-8"))
+        return data.get("schema_version") or data.get("contract_version") or "unknown"
+    except Exception:
+        return "unknown"
 
 
 def _db() -> sqlite3.Connection:
@@ -759,19 +785,12 @@ def _map_engine_sev(sev: str) -> str:
         return "ok"
     if s == "":
         return "ok"
-    return s  # info etc
+    return s
 
 
 def _advice_normalised_snapshot(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Returns list of {severity: ok|warn|bad|info, message: str, evidence?: dict}
-    Preference: advice_engine.build_advice_and_health() (crit/warn/info)
-    Fallback: rules_evaluate() (bad/warn/info)
-    Also injects a cheap-but-useful RAM headroom recommendation when facts show upgrade potential.
-    """
     out: List[Dict[str, Any]] = []
 
-    # 1) advice engine (preferred)
     if advice_build:
         try:
             adv, _health = advice_build(snapshot)
@@ -792,7 +811,6 @@ def _advice_normalised_snapshot(snapshot: Dict[str, Any]) -> List[Dict[str, Any]
         except Exception:
             pass
 
-    # 2) rules fallback (if engine produced nothing)
     if not out:
         try:
             items = rules_evaluate(snapshot) or []
@@ -807,7 +825,6 @@ def _advice_normalised_snapshot(snapshot: Dict[str, Any]) -> List[Dict[str, Any]
             if msg:
                 out.append({"severity": lvl, "message": str(msg)})
 
-    # 3) RAM headroom recommendation (facts-driven)
     try:
         facts = snapshot.get("facts") if isinstance(snapshot.get("facts"), dict) else {}
         rt = facts.get("ram_total_gb")
@@ -861,21 +878,32 @@ def _get_gpu_list(metrics: Dict[str, Any], raw: Dict[str, Any]) -> List[Dict[str
 def _sparkline(values: List[Optional[float]], w: int = 340, h: int = 36) -> str:
     pts: List[Tuple[float, float]] = []
     vs = [v for v in values if v is not None]
-    if len(vs) < 2:
-        return f'<svg viewBox="0 0 {w} {h}" preserveAspectRatio="none"></svg>'
+
+    if len(vs) < 3:
+        return ""
+
     vmin, vmax = min(vs), max(vs)
-    if vmax - vmin < 1e-9:
-        vmax = vmin + 1.0
+    span = vmax - vmin
+    pad = 0.5 if span < 0.5 else span * 0.2
+
+    vmin -= pad
+    vmax += pad
+
     n = len(values)
+
     for i, v in enumerate(values):
         if v is None:
             continue
+
         x = (i / max(1, (n - 1))) * (w - 2) + 1
         y = (1 - ((v - vmin) / (vmax - vmin))) * (h - 2) + 1
         pts.append((x, y))
+
     if len(pts) < 2:
-        return f'<svg viewBox="0 0 {w} {h}" preserveAspectRatio="none"></svg>'
+        return ""
+
     d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in pts)
+
     return (
         f'<svg viewBox="0 0 {w} {h}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">'
         f'<path d="{d}" fill="none" stroke="rgba(255,255,255,0.62)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
@@ -896,20 +924,30 @@ def _trend_series(history: List[Dict[str, Any]]) -> Dict[str, List[Optional[floa
 
         ram.append(_get_ram_used_pct(metrics, raw_metrics))
 
-        mx = None
+        chosen_disk = None
         du = metrics.get("disk_used")
-        if isinstance(du, list):
+        mounts: List[Dict[str, Any]] = [m for m in du if isinstance(m, dict)] if isinstance(du, list) else []
+
+        root = next((m for m in mounts if str(m.get("mount") or "") in ("/", "/root")), None)
+        if root:
+            v = _fnum(root.get("used_pct"))
+            if v is None:
+                v = _fnum(root.get("pct"))
+            if v is not None:
+                chosen_disk = _clamp(v, 0.0, 100.0)
+
+        if chosen_disk is None and mounts:
             vals = []
-            for m in du:
-                if isinstance(m, dict):
-                    v = _fnum(m.get("used_pct"))
-                    if v is None:
-                        v = _fnum(m.get("pct"))
-                    if v is not None:
-                        vals.append(v)
+            for m in mounts:
+                v = _fnum(m.get("used_pct"))
+                if v is None:
+                    v = _fnum(m.get("pct"))
+                if v is not None:
+                    vals.append(v)
             if vals:
-                mx = max(vals)
-        disk.append(None if mx is None else _clamp(mx, 0.0, 100.0))
+                chosen_disk = _clamp(max(vals), 0.0, 100.0)
+
+        disk.append(chosen_disk)
 
         gmax = None
         gl = _get_gpu_list(metrics, raw)
@@ -926,6 +964,41 @@ def _trend_series(history: List[Dict[str, Any]]) -> Dict[str, List[Optional[floa
     return {"ram": ram, "disk": disk, "gpu": gpu}
 
 
+def _trend_block(label: str, svg: str, empty_text: Optional[str] = None) -> str:
+    text = empty_text
+
+    if not svg and not text:
+        text = "Collecting history... check back in ~15m"
+
+    if text:
+        return (
+            f"<div class='trenditem'>"
+            f"<div class='tk'>{_html_escape(label)}</div>"
+            f"<div class='tv'><span class='muted'>{_html_escape(text)}</span></div>"
+            f"</div>"
+        )
+
+    return (
+        f"<div class='trenditem'>"
+        f"<div class='tk'>{_html_escape(label)}</div>"
+        f"<div class='tv'>{svg}</div>"
+        f"</div>"
+    )
+
+
+def _agent_version_state(actual: str, expected: str) -> str:
+    a = (actual or "").strip()
+    e = (expected or "").strip()
+
+    if not a or a == "unknown":
+        return "unknown"
+    if not e or e == "unknown":
+        return "ok"
+    if a == e:
+        return "ok"
+    return "behind"
+
+
 @dataclass
 class NodeView:
     node: str
@@ -934,16 +1007,20 @@ class NodeView:
     model: str
     cpu: str
     bios: str
+    agent_version: str
     ram_total: str
     ram_used_pct: Optional[float]
     load1: Optional[float]
     temp_c: Optional[float]
     ts: Optional[datetime]
     stale: bool
+    health_state: str
+    health_score: int
+    age_minutes: Optional[float]
 
-    advice: List[Dict[str, Any]]          # rendered list (may include stale injection)
-    advice_sev: str                       # computed from real advice only (ok/warn/bad)
-    advice_counts: Dict[str, int]         # counts of warn/bad items (real advice only)
+    advice: List[Dict[str, Any]]
+    advice_sev: str
+    advice_counts: Dict[str, int]
 
     worst: str
     headline: str
@@ -967,31 +1044,63 @@ def _build_node_view(conn: sqlite3.Connection, node: str, rec: Dict[str, Any], h
     raw_metrics = raw.get("metrics") if isinstance(raw.get("metrics"), dict) else {}
 
     ts = _parse_ts(_safe_str(rec.get("ts") or payload.get("ts") or ""))
-    stale = True
-    if ts:
-        stale = (_utcnow() - ts).total_seconds() > STALE_SECONDS
+
+    health = compute_health(payload, ctx={})
+    health_state = str(health.get("state") or "healthy").lower()
+    try:
+        health_score = int(health.get("score") or 0)
+    except Exception:
+        health_score = 0
+
+    age_minutes = health.get("age_minutes")
+    try:
+        age_minutes = float(age_minutes) if age_minutes is not None else None
+    except Exception:
+        age_minutes = None
+
+    stale = health_state == "critical" and any(
+        "stale" in str(r).lower() for r in (health.get("reasons") or [])
+    )
 
     model = _safe_str(raw_facts.get("model") or facts.get("model") or "")
     cpu = _safe_str(raw_facts.get("cpu") or facts.get("cpu") or "")
     bios = _bios_display(facts, raw_facts)
+    agent_version = _safe_str(payload.get("agent_version") or "unknown")
 
     ram_total = _ram_total_display(facts, raw_facts)
     ram_used_pct = _get_ram_used_pct(metrics, raw_metrics)
     load1 = _get_load(metrics, raw_metrics)
     temp_c = _cpu_temp(metrics, raw_metrics)
 
-    # Compute advice severity BEFORE we inject stale message
     advice_real = _advice_normalised_snapshot(payload)
     real_warn = sum(1 for a in advice_real if str(a.get("severity")).lower() == "warn")
     real_bad = sum(1 for a in advice_real if str(a.get("severity")).lower() == "bad")
     advice_sev = "bad" if real_bad else ("warn" if real_warn else "ok")
 
     advice = list(advice_real)
-    if stale:
-        advice = [{"severity": "bad", "message": f"Node has stopped reporting (last seen {_ago(ts)})."}] + (advice or [])
 
-    worst = "stale" if stale else _worst_severity([a for a in advice if str(a.get("severity")).lower() in ("warn", "bad")])
-    headline = "This may end badly." if stale else _headline_line(("bad" if worst == "bad" else ("warn" if worst == "warn" else "ok")))
+    delayed = health_state == "warning" and any(
+        "delayed" in str(r).lower() for r in (health.get("reasons") or [])
+    )
+
+    if stale:
+        advice = [{"severity": "bad", "message": f"Node has stopped reporting (last seen {_ago(ts)})."}] + advice
+    elif delayed:
+        advice = [{"severity": "warn", "message": f"Node reporting delayed (last seen {_ago(ts)})."}] + advice
+
+    if stale:
+        worst = "stale"
+    elif delayed:
+        worst = "warn"
+    else:
+        worst = _worst_severity([a for a in advice if str(a.get("severity")).lower() in ("warn", "bad")])
+
+    if stale:
+        headline = "Node appears stale."
+    elif delayed:
+        headline = "Node reporting looks delayed."
+    else:
+        headline = _headline_line("bad" if worst == "bad" else ("warn" if worst == "warn" else "ok"))
 
     disks_physical = _get_disk_physical(payload, metrics, raw)
     gpus = _get_gpu_list(metrics, raw)
@@ -999,7 +1108,6 @@ def _build_node_view(conn: sqlite3.Connection, node: str, rec: Dict[str, Any], h
     hist = _fetch_history(conn, node, hours=hours, limit=MAX_HISTORY_ROWS)
     series = _trend_series(hist)
 
-    # Debug “inputs to advice”
     debug: Dict[str, Any] = {}
     try:
         debug = {
@@ -1027,12 +1135,16 @@ def _build_node_view(conn: sqlite3.Connection, node: str, rec: Dict[str, Any], h
         model=model,
         cpu=cpu,
         bios=bios,
+        agent_version=agent_version,
         ram_total=ram_total,
         ram_used_pct=ram_used_pct,
         load1=load1,
         temp_c=temp_c,
         ts=ts,
         stale=stale,
+        health_state=health_state,
+        health_score=health_score,
+        age_minutes=age_minutes,
         advice=advice,
         advice_sev=advice_sev,
         advice_counts={"warn": real_warn, "bad": real_bad},
@@ -1072,15 +1184,11 @@ def _badge_text(sev: str, label: str) -> str:
 
 
 def _top_action(nv: NodeView) -> Optional[Tuple[str, str]]:
-    """
-    Returns (severity, message) for the most important recommendation line.
-    """
     if nv.stale:
         return ("stale", f"Stopped reporting ({_ago(nv.ts)}).")
     if not nv.advice:
         return None
 
-    # Prefer BAD then WARN from the evaluated advice list
     for sev in ("bad", "warn"):
         for a in nv.advice:
             if str(a.get("severity") or "").lower() == sev:
@@ -1221,20 +1329,18 @@ def _render_top_banner(nodes: List[NodeView]) -> str:
 
 
 def _render_fleet_map(nodeviews: List[NodeView], brain_name: str) -> str:
-    # Simple left->right SVG: Brain on left, nodes stacked on right
     nodes_sorted = sorted(list(nodeviews), key=lambda x: x.node)
     others = [nv for nv in nodes_sorted if nv.node != brain_name]
     n = max(1, len(others))
 
     w = 980
-    h = 120 + n * 56
+    h = 140 + n * 68
 
-    bx, by = 120, 70
+    bx, by = 120, 80
     nx = 520
-    start_y = 70
-    step = 56
+    start_y = 86
+    step = 68
 
-    # pulse when last update is recent
     PULSE_RECENT_SECONDS = int(os.environ.get("HARRY_PULSE_RECENT_SECONDS", "90"))
 
     def dot_color(sev: str) -> str:
@@ -1265,7 +1371,6 @@ def _render_fleet_map(nodeviews: List[NodeView], brain_name: str) -> str:
         "</defs>"
     )
 
-    # Brain block
     svg.append(
         f'<rect x="{bx-70}" y="{by-28}" width="220" height="56" rx="16" '
         f'fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.18)"/>'
@@ -1285,31 +1390,40 @@ def _render_fleet_map(nodeviews: List[NodeView], brain_name: str) -> str:
         y = start_y + i * step
         sid = nv.node_id
 
-        # Node -> Brain direction
         path_d = f"M {nx-40} {y} C {nx-120} {y}, {bx+260} {by}, {bx+150} {by}"
-
-        # Give this path + dot stable IDs so JS_PULSE can animate them
         svg.append(f'<path id="link-{sid}" class="linkline" d="{path_d}"/>')
 
-        # Status dot at node end
         col = dot_color(nv.worst)
         svg.append(f'<circle id="dot-{sid}" class="nodeDot" cx="{nx-40}" cy="{y}" r="10" fill="{col}" filter="url(#g)"/>')
 
-        # Labels (CLICKABLE)
         label = nv.node
         meta = _ago(nv.ts)
 
+        agent_state = _agent_version_state(nv.agent_version, AGENT_VERSION)
+        agent_line = f"Agent {nv.agent_version or 'unknown'}"
+        if agent_state == "behind":
+            agent_line += " · behind"
+
+        agent_fill = "rgba(255,255,255,0.62)"
+        if agent_state == "behind":
+            agent_fill = "rgba(251,191,36,0.92)"
+        elif agent_state == "unknown":
+            agent_fill = "rgba(255,255,255,0.45)"
+
         svg.append(
             f'<a xlink:href="#node-{sid}" href="#node-{sid}">'
-            f'<text x="{nx}" y="{y+4}" fill="rgba(255,255,255,0.92)" font-size="14" font-weight="800">'
+            f'<text x="{nx}" y="{y+2}" fill="rgba(255,255,255,0.92)" font-size="14" font-weight="800">'
             f"{_html_escape(label)}</text></a>"
         )
         svg.append(
-            f'<text x="{nx+160}" y="{y+4}" fill="rgba(255,255,255,0.62)" font-size="12">'
+            f'<text x="{nx}" y="{y+20}" fill="{agent_fill}" font-size="10">'
+            f"{_html_escape(agent_line)}</text>"
+        )
+        svg.append(
+            f'<text x="{nx+190}" y="{y+2}" fill="rgba(255,255,255,0.62)" font-size="12">'
             f"{_html_escape(meta)}</text>"
         )
 
-        # Optional: immediate on-load pulse if update is very recent
         recent = False
         if nv.ts:
             try:
@@ -1333,7 +1447,7 @@ def _render_fleet_map(nodeviews: List[NodeView], brain_name: str) -> str:
 
 
 def _render_upgrade_shortlist(nodeviews: List[NodeView], max_items: int = 10) -> str:
-    items: List[Tuple[str, str, str, str]] = []  # (sev, node, node_id, msg)
+    items: List[Tuple[str, str, str, str]] = []
     for nv in nodeviews:
         for a in (nv.advice or []):
             sev = str(a.get("severity") or "info").lower()
@@ -1404,7 +1518,6 @@ def _render_inventory_table(nodeviews: List[NodeView]) -> str:
         bios = nv.bios or "—"
         last = f"{_fmt_dt(nv.ts)} ({_ago(nv.ts)})"
 
-        # Advice column: show stale / bad / warn / ok + a tiny top message hint
         if nv.stale:
             adv = _badge_text("stale", "STALE")
             hint = "stopped reporting"
@@ -1455,13 +1568,9 @@ def _render_inventory_table(nodeviews: List[NodeView]) -> str:
 </table>
 """
 
+
 def _render_advice_queue(nodeviews: List[NodeView]) -> str:
-    """
-    A top-level "Harry recommends" queue.
-    Shows stale + BAD + WARN items with jump links.
-    """
     items: List[Tuple[int, str, NodeView, str]] = []
-    # priority: stale (0), bad (1), warn (2)
     for nv in nodeviews:
         if nv.stale:
             items.append((0, "stale", nv, f"Stopped reporting (last seen {_ago(nv.ts)})."))
@@ -1522,6 +1631,7 @@ def _render_advice_queue(nodeviews: List[NodeView]) -> str:
 def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
     dot = _sev_dot(nv.worst)
     model = f" ({nv.model})" if nv.model else ""
+    agent_state = _agent_version_state(nv.agent_version, AGENT_VERSION)
 
     pills: List[str] = []
     if nv.load1 is not None:
@@ -1530,9 +1640,10 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
         pills.append(_pill("neutral", f"CPU {nv.temp_c:.1f}°C"))
     pills.append(_pill("neutral", f"Updated {_fmt_dt(nv.ts)} ({_ago(nv.ts)})"))
 
-    # Advice pill in header (visible, not hidden)
     if nv.stale:
         pills.insert(0, _pill("bad", "STALE · stopped reporting"))
+    elif nv.health_state == "warning" and nv.age_minutes is not None and nv.age_minutes > 15:
+        pills.insert(0, _pill("warn", "DELAYED · reporting slow"))
     else:
         sev = (nv.advice_sev or "ok").lower()
         if sev == "bad":
@@ -1566,6 +1677,9 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
             <span class="{dot}"></span>
             <a class="nodename" href="/node/{_html_escape(nv.node)}?hours={hours}">{_html_escape(nv.node)}</a>
             <span class="model">{_html_escape(model)}</span>
+          </div>
+          <div class="nodever {agent_state}">
+            Agent {_html_escape(nv.agent_version or 'unknown')}{' · behind' if agent_state == 'behind' else ''}
           </div>
           <div class="subtitle">{_html_escape(nv.headline)}</div>
           {top_action_line}
@@ -1618,9 +1732,9 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
         {debug_html}
 
         <div class="trendrow">
-          <div class="trenditem"><div class="tk">RAM trend</div><div class="tv">{nv.trend_ram_svg}</div></div>
-          <div class="trenditem"><div class="tk">Disk trend</div><div class="tv">{nv.trend_disk_svg}</div></div>
-          <div class="trenditem"><div class="tk">GPU trend</div><div class="tv">{nv.trend_gpu_svg}</div></div>
+          {_trend_block("RAM trend", nv.trend_ram_svg)}
+          {_trend_block("Disk trend", nv.trend_disk_svg)}
+          {_trend_block("GPU trend", nv.trend_gpu_svg, "No GPU detected" if not nv.gpus else None)}
         </div>
       </details>
     </section>
@@ -1640,6 +1754,7 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
     model = raw_facts.get("model") or facts.get("model")
     cpu = raw_facts.get("cpu") or facts.get("cpu")
     bios = _bios_display(facts, raw_facts)
+    agent_version = payload.get("agent_version") or "unknown"
 
     ram_total_gb = raw_facts.get("ram_total_gb") or facts.get("ram_total_gb")
     ram_max_gb = raw_facts.get("ram_max_gb") or facts.get("ram_max_gb")
@@ -1652,7 +1767,6 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
     disks = facts.get("disks") if isinstance(facts.get("disks"), list) else []
     gpus = facts.get("gpus") if isinstance(facts.get("gpus"), list) else []
 
-    # Also include detected GPUs from metrics if facts.gpus is empty
     metrics = _get_metrics(payload)
     if not gpus:
         gpus = _get_gpu_list(metrics, _raw_payload(payload))
@@ -1668,6 +1782,7 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
     return {
         "node": node,
         "last_seen": ts,
+        "agent_version": agent_version,
         "model": model,
         "cpu": cpu,
         "bios_version": bios,
@@ -1689,6 +1804,7 @@ def _inventory_md(rows: List[Dict[str, Any]]) -> str:
     for r in rows:
         lines.append(f"## {r.get('node')}")
         lines.append(f"- Last seen: `{r.get('last_seen')}`")
+        lines.append(f"- Agent: `{r.get('agent_version') or 'unknown'}`")
         lines.append(f"- Model: `{r.get('model') or '—'}`")
         lines.append(f"- CPU: `{r.get('cpu') or '—'}`")
         rt = r.get("ram_total_gb")
@@ -1780,7 +1896,6 @@ def index(request: Request) -> HTMLResponse:
         for node, rec in latest.items():
             nodeviews.append(_build_node_view(conn, node, rec, hours=hours))
 
-        # Sort: stale first, then bad advice, warn advice, ok
         def sort_key(nv: NodeView) -> Tuple[int, int, str]:
             if nv.stale:
                 return (0, 0, nv.node)
@@ -1794,8 +1909,8 @@ def index(request: Request) -> HTMLResponse:
 
         generated = _utcnow().isoformat().replace("+00:00", "Z")
         brain_name = (os.environ.get("HARRY_BRAIN_NODE") or "brain").strip()
+        schema_current = _load_schema_current()
 
-        # Counts for top nav
         stale_n = sum(1 for n in nodeviews if n.stale)
         bad_n = sum(1 for n in nodeviews if not n.stale and (n.advice_sev or "ok") == "bad")
         warn_n = sum(1 for n in nodeviews if not n.stale and (n.advice_sev or "ok") == "warn")
@@ -1808,7 +1923,7 @@ def index(request: Request) -> HTMLResponse:
   <div class="sectionhead">
     <div>
       <div class="h2">Fleet map</div>
-      <div class="h2sub">Brain → nodes, with freshness + an advice hint (and a cheeky pulse when updates arrive).</div>
+      <div class="h2sub">Brain → nodes, with freshness + actual agent version per node.</div>
     </div>
     <div class="actions">
       <a class="btn" href="/inventory">Export inventory (JSON)</a>
@@ -1886,6 +2001,14 @@ def index(request: Request) -> HTMLResponse:
 </div>
 """
 
+        footer_versions_html = (
+            f'<div class="footerline">'
+            f'Harry Brain {_html_escape(BRAIN_VERSION)} | '
+            f'Dist Agent {_html_escape(AGENT_VERSION)} | '
+            f'Schema {_html_escape(schema_current)}'
+            f"</div>"
+        )
+
         debug_chip = f'<a class="chip" href="/?hours={hours}&debug=0">Debug <span class="tiny">(on)</span></a>' if debug else f'<a class="chip" href="/?hours={hours}&debug=1">Debug <span class="tiny">(off)</span></a>'
 
         html = f"""
@@ -1943,6 +2066,7 @@ def index(request: Request) -> HTMLResponse:
 
     {node_details_html}
 
+    {footer_versions_html}
   </div>
 
   <script>{JS_PULSE}</script>

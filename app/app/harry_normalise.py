@@ -184,7 +184,7 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
       - metrics.disk_used[]: allow optional fs; used_pct must be numeric
     Always:
       - ensure derived + advice exist
-      - ensure schema_version, node, ts exist
+      - ensure schema_version, agent_version, node, ts exist
       - stash raw/richer bits under extensions where useful
     """
 
@@ -206,6 +206,7 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
 
     node = (payload.get("node") or _safe_dict(payload.get("facts")).get("hostname") or "unknown")
     ts = payload.get("ts") or _iso_utc_now()
+    agent_version = str(payload.get("agent_version") or "unknown")
 
     facts_in = _safe_dict(payload.get("facts"))
     metrics_in = _safe_dict(payload.get("metrics"))
@@ -379,6 +380,7 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
 
     return {
         "schema_version": str(contract_version),
+        "agent_version": agent_version,
         "node": node,
         "ts": ts,
         "facts": facts_out,

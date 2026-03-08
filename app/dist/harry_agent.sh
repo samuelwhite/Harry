@@ -10,6 +10,7 @@ set -euo pipefail
 #   HARRY_URL               legacy ingest URL (fallback)
 #   HARRY_BASE_URL          base URL (optional; if set, used to derive ingest+dist)
 #   HARRY_SELF_UPDATE       1/0 (default: 1)
+#   HARRY_LOG_FILE          optional log file override
 # -----------------------------------------------------------------------------
 
 AGENT_VERSION="__HARRY_AGENT_VERSION__"
@@ -67,14 +68,15 @@ for arg in "${@:-}"; do
 done
 
 # -----------------------------------------------------------------------------
-# Logging helper (no sudo; safe if not root)
+# Failure logging helper (safe if not root)
 # -----------------------------------------------------------------------------
-LOG_FILE="/var/log/harry-agent.log"
+LOG_FILE="${HARRY_LOG_FILE:-/var/log/harry-agent.log}"
 if ! ( touch "$LOG_FILE" >/dev/null 2>&1 ); then
   LOG_FILE="/tmp/harry-agent.log"
+  touch "$LOG_FILE" >/dev/null 2>&1 || true
 fi
 
-log() {
+log_fail() {
   local msg="$1"
   printf '[%s] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$msg" >> "$LOG_FILE" 2>/dev/null || true
 }
@@ -108,12 +110,13 @@ self_update() {
 
   if ! "$CURL" -fsSL "$DIST_URL" -o "$tmp" >/dev/null 2>&1; then
     rm -f "$tmp" >/dev/null 2>&1 || true
+    log_fail "self_update_failed node=${HARRY_NODE} reason=download_failed dist_url=${DIST_URL}"
     return 0
   fi
 
   if [ ! -s "$tmp" ]; then
     rm -f "$tmp" >/dev/null 2>&1 || true
-    log "Update rejected: downloaded candidate empty."
+    log_fail "self_update_failed node=${HARRY_NODE} reason=empty_candidate dist_url=${DIST_URL}"
     return 0
   fi
 
@@ -121,7 +124,7 @@ self_update() {
 
   if ! bash -n "$tmp" >/dev/null 2>&1; then
     rm -f "$tmp" >/dev/null 2>&1 || true
-    log "Update rejected: candidate fails 'bash -n'."
+    log_fail "self_update_failed node=${HARRY_NODE} reason=bash_syntax_invalid dist_url=${DIST_URL}"
     return 0
   fi
 
@@ -129,12 +132,13 @@ self_update() {
   tmp_payload="$(mktemp /tmp/harry_agent_payload.XXXXXX.json)"
   if ! bash "$tmp" --print --no-update >"$tmp_payload" 2>/dev/null; then
     rm -f "$tmp" "$tmp_payload" >/dev/null 2>&1 || true
-    log "Update rejected: candidate failed to run '--print --no-update'."
+    log_fail "self_update_failed node=${HARRY_NODE} reason=candidate_print_check_failed dist_url=${DIST_URL}"
     return 0
   fi
+
   if [ ! -s "$tmp_payload" ] || ! json_is_valid_file "$tmp_payload"; then
     rm -f "$tmp" "$tmp_payload" >/dev/null 2>&1 || true
-    log "Update rejected: candidate did not emit valid JSON."
+    log_fail "self_update_failed node=${HARRY_NODE} reason=candidate_invalid_json dist_url=${DIST_URL}"
     return 0
   fi
   rm -f "$tmp_payload" >/dev/null 2>&1 || true
@@ -149,13 +153,12 @@ self_update() {
 
   if mv -f "$tmp" "$me" >/dev/null 2>&1; then
     chmod 755 "$me" >/dev/null 2>&1 || true
-    log "Updated agent from $DIST_URL. Re-exec."
     export HARRY_SKIP_SELF_UPDATE=1
     exec "$me" "$@"
   fi
 
   rm -f "$tmp" >/dev/null 2>&1 || true
-  log "Update available but could not replace $me (permissions?)."
+  log_fail "self_update_failed node=${HARRY_NODE} reason=replace_failed path=${me}"
   return 0
 }
 
@@ -179,10 +182,12 @@ if [ "$BACKOFF_ENABLE" = "1" ]; then
 
   MEM_USED=""
   if [ -r /proc/meminfo ]; then
-    MEM_USED="$(awk '
-      /^MemTotal:/ {t=$2}
-      /^MemAvailable:/ {a=$2}
-      END { if (t>0) printf "%.2f", (100.0*(t-a)/t); }' /proc/meminfo 2>/dev/null || true)"
+    MEM_USED="$(
+      awk '
+        /^MemTotal:/ {t=$2}
+        /^MemAvailable:/ {a=$2}
+        END { if (t>0) printf "%.2f", (100.0*(t-a)/t); }' /proc/meminfo 2>/dev/null || true
+    )"
   fi
 
   if [ -n "$LOAD1" ]; then
@@ -200,7 +205,6 @@ except Exception:
 PY
     )"
     if [ "$TOO_BUSY" = "1" ]; then
-      log "Backoff: load1=$LOAD1 cores=$CORES thr_per_core=$MAX_LOAD_PER_CORE"
       exit 0
     fi
   fi
@@ -219,7 +223,6 @@ except Exception:
 PY
     )"
     if [ "$TOO_FULL" = "1" ]; then
-      log "Backoff: mem_used_pct=$MEM_USED thr=$MAX_MEM_USED_PCT"
       exit 0
     fi
   fi
@@ -423,14 +426,42 @@ except Exception:
 
 disk_used = []
 if which("df"):
-    df_txt = run(["df","-P"])
+    df_txt = run(["df", "-B1", "-P"])
     lines = [l for l in df_txt.splitlines() if l.strip()]
     for l in lines[1:]:
         parts = l.split()
-        if len(parts) < 6: continue
-        fs, pct, mount = parts[0], parts[4], parts[5]
-        if pct.endswith("%"): pct = pct[:-1]
-        disk_used.append({"fs": fs, "mount": mount, "used_pct": to_float(pct)})
+        if len(parts) < 6:
+            continue
+
+        fs = parts[0]
+        total_b = to_float(parts[1])
+        used_b = to_float(parts[2])
+        mount = parts[5]
+
+        fs_l = (fs or "").lower()
+        mount_l = (mount or "").lower()
+
+        # Skip pseudo / ephemeral / noisy mounts
+        if fs_l in ("udev", "tmpfs", "devtmpfs", "overlay", "squashfs", "efivarfs"):
+            continue
+        if mount_l.startswith(("/proc", "/sys", "/run", "/dev")):
+            continue
+        if "/var/lib/docker/" in mount_l:
+            continue
+
+        used_pct = None
+        size_gb = None
+
+        if total_b and total_b > 0 and used_b is not None:
+            used_pct = (used_b / total_b) * 100.0
+            size_gb = total_b / 1024 / 1024 / 1024
+
+        disk_used.append({
+            "fs": fs,
+            "mount": mount,
+            "used_pct": used_pct,
+            "size_gb": round(size_gb, 2) if size_gb is not None else None,
+        })
 
 disk_physical = []
 if which("lsblk"):
@@ -585,7 +616,7 @@ PY_EXIT=$?
 set -e
 
 if [ "$PY_EXIT" -ne 0 ]; then
-  log "Payload generation failed (python exit=$PY_EXIT)."
+  log_fail "payload_generation_failed node=${HARRY_NODE} python_exit=${PY_EXIT}"
   echo "❌ Payload generation failed:" >&2
   sed -n '1,120p' "$TMP_ERR" >&2 || true
   rm -f "$TMP_PAYLOAD" "$TMP_ERR" >/dev/null 2>&1 || true
@@ -593,13 +624,13 @@ if [ "$PY_EXIT" -ne 0 ]; then
 fi
 
 if [ ! -s "$TMP_PAYLOAD" ]; then
-  log "Payload generation produced empty output."
+  log_fail "payload_generation_failed node=${HARRY_NODE} reason=empty_output"
   rm -f "$TMP_PAYLOAD" "$TMP_ERR" >/dev/null 2>&1 || true
   exit 1
 fi
 
 if ! json_is_valid_file "$TMP_PAYLOAD"; then
-  log "Payload generation produced invalid JSON."
+  log_fail "payload_generation_failed node=${HARRY_NODE} reason=invalid_json_output"
   rm -f "$TMP_PAYLOAD" "$TMP_ERR" >/dev/null 2>&1 || true
   exit 1
 fi
@@ -611,18 +642,30 @@ if [ "$PRINT_ONLY" = "1" ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# SEND TO BRAIN (log non-200, do not fail systemd timer)
+# SEND TO BRAIN (log failures, do not fail systemd timer)
 # -----------------------------------------------------------------------------
 TMP_RESP="$(mktemp /tmp/harry_agent_resp.XXXXXX.json)"
 
-HTTP_CODE="$("$CURL" -sS -o "$TMP_RESP" -w "%{http_code}" \
-  -X POST "${HARRY_INGEST_URL}" \
-  -H "Content-Type: application/json" \
-  --data-binary @"$TMP_PAYLOAD" || true)"
+set +e
+HTTP_CODE="$(
+  "$CURL" -sS -o "$TMP_RESP" -w "%{http_code}" \
+    -X POST "${HARRY_INGEST_URL}" \
+    -H "Content-Type: application/json" \
+    --data-binary @"$TMP_PAYLOAD"
+)"
+CURL_EXIT=$?
+set -e
+
+if [ "$CURL_EXIT" -ne 0 ]; then
+  resp="$(cat "$TMP_RESP" 2>/dev/null || true)"
+  log_fail "ingest_failed node=${HARRY_NODE} reason=curl_exit_${CURL_EXIT} url=${HARRY_INGEST_URL} resp=${resp}"
+  rm -f "$TMP_PAYLOAD" "$TMP_ERR" "$TMP_RESP" >/dev/null 2>&1 || true
+  exit 0
+fi
 
 if [ "$HTTP_CODE" != "200" ]; then
   resp="$(cat "$TMP_RESP" 2>/dev/null || true)"
-  log "POST failed http_code=${HTTP_CODE} url=${HARRY_INGEST_URL} resp=${resp}"
+  log_fail "ingest_failed node=${HARRY_NODE} reason=http_${HTTP_CODE} url=${HARRY_INGEST_URL} resp=${resp}"
   rm -f "$TMP_PAYLOAD" "$TMP_ERR" "$TMP_RESP" >/dev/null 2>&1 || true
   exit 0
 fi
