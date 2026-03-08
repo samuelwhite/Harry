@@ -4,6 +4,18 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 # Harry Agent (self-updating, robust)
 # -----------------------------------------------------------------------------
+# Design goals:
+#   - produce a valid JSON snapshot
+#   - send it to the Brain
+#   - quietly self-update when a newer dist script is available
+#   - fail safely and log locally when something goes wrong
+#
+# Harry agents are intentionally conservative:
+#   - success runs are silent
+#   - failure runs are logged
+#   - broken update candidates are rejected before replacement
+#   - the last-known-good script is preserved where possible
+#
 # Env:
 #   HARRY_NODE              override node name (default: hostname)
 #   HARRY_INGEST_URL        full ingest URL (preferred)
@@ -37,7 +49,8 @@ HARRY_BASE_URL="${HARRY_BASE_URL:-}"
 HARRY_INGEST_URL="${HARRY_INGEST_URL:-}"
 HARRY_URL="${HARRY_URL:-}"
 
-# Derive ingest URL
+# Derive Brain endpoints in a tolerant way so the agent can be configured with
+# either a full ingest URL or a base URL.
 if [ -n "$HARRY_BASE_URL" ]; then
   HARRY_BASE_URL="${HARRY_BASE_URL%/}"
   HARRY_INGEST_URL="${HARRY_INGEST_URL:-$HARRY_BASE_URL/ingest}"
@@ -68,8 +81,11 @@ for arg in "${@:-}"; do
 done
 
 # -----------------------------------------------------------------------------
-# Failure logging helper (safe if not root)
+# Failure logging helper
 # -----------------------------------------------------------------------------
+# The agent prefers /var/log/harry-agent.log, but falls back to /tmp when it
+# cannot write there. This keeps the agent usable under non-root/service-user
+# conditions.
 LOG_FILE="${HARRY_LOG_FILE:-/var/log/harry-agent.log}"
 if ! ( touch "$LOG_FILE" >/dev/null 2>&1 ); then
   LOG_FILE="/tmp/harry-agent.log"
@@ -92,8 +108,18 @@ PY
 }
 
 # -----------------------------------------------------------------------------
-# Self-update (validate-before-replace + LKG)
+# Self-update (validate-before-replace + last-known-good)
 # -----------------------------------------------------------------------------
+# Update strategy:
+#   1. download candidate
+#   2. ensure non-empty
+#   3. validate bash syntax
+#   4. run candidate in --print mode and require valid JSON output
+#   5. preserve current copy as .lkg
+#   6. replace and exec the new version
+#
+# This is deliberately cautious because a bad dist agent could otherwise break
+# the whole fleet.
 self_update() {
   if [ "$SELF_UPDATE" = "0" ] || [ "$NO_UPDATE" = "1" ] || [ "${HARRY_SKIP_SELF_UPDATE:-0}" = "1" ]; then
     return 0
@@ -143,7 +169,7 @@ self_update() {
   fi
   rm -f "$tmp_payload" >/dev/null 2>&1 || true
 
-  # If identical content, stop here (avoid churn)
+  # Avoid needless replacement churn if content is identical.
   if cmp -s "$tmp" "$me" >/dev/null 2>&1; then
     rm -f "$tmp" >/dev/null 2>&1 || true
     return 0
@@ -165,8 +191,11 @@ self_update() {
 self_update "$@"
 
 # -----------------------------------------------------------------------------
-# Backoff under load / memory pressure (polite agent)
+# Back off under load / memory pressure
 # -----------------------------------------------------------------------------
+# Harry is meant to be quiet infrastructure. If a node is already busy or under
+# memory pressure, the agent prefers to skip a run rather than compete with the
+# workload it is observing.
 BACKOFF_ENABLE="${HARRY_BACKOFF_ENABLE:-1}"
 MAX_LOAD_PER_CORE="${HARRY_MAX_LOAD_PER_CORE:-1.5}"
 MAX_MEM_USED_PCT="${HARRY_MAX_MEM_USED_PCT:-92}"
@@ -229,8 +258,12 @@ PY
 fi
 
 # -----------------------------------------------------------------------------
-# Build payload in Python (FAIL LOUDLY + NEVER POST INVALID JSON)
+# Build payload in Python
 # -----------------------------------------------------------------------------
+# Payload construction is done in Python because:
+#   - JSON generation is safer and clearer
+#   - data parsing is less brittle than in pure shell
+#   - validation can happen before any POST attempt
 TMP_PAYLOAD="$(mktemp /tmp/harry_agent_payload.XXXXXX.json)"
 TMP_ERR="$(mktemp /tmp/harry_agent_err.XXXXXX.log)"
 
@@ -441,7 +474,8 @@ if which("df"):
         fs_l = (fs or "").lower()
         mount_l = (mount or "").lower()
 
-        # Skip pseudo / ephemeral / noisy mounts
+        # Skip pseudo / ephemeral / noisy mounts so Harry stays focused on
+        # meaningful storage pressure rather than container/runtime noise.
         if fs_l in ("udev", "tmpfs", "devtmpfs", "overlay", "squashfs", "efivarfs"):
             continue
         if mount_l.startswith(("/proc", "/sys", "/run", "/dev")):
@@ -642,8 +676,11 @@ if [ "$PRINT_ONLY" = "1" ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# SEND TO BRAIN (log failures, do not fail systemd timer)
+# Send to Brain
 # -----------------------------------------------------------------------------
+# We intentionally do not fail the systemd timer on network/HTTP problems.
+# The agent should log the issue and wait for the next run rather than creating
+# noisy repeated service failures.
 TMP_RESP="$(mktemp /tmp/harry_agent_resp.XXXXXX.json)"
 
 set +e
