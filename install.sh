@@ -46,14 +46,77 @@ while [[ $# -gt 0 ]]; do
 done
 
 need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "Missing dependency: $1" >&2
-    exit 1
-  }
+  command -v "$1" >/dev/null 2>&1
 }
 
-need_cmd docker
-need_cmd curl
+install_packages() {
+  if [ "$#" -eq 0 ]; then
+    return 0
+  fi
+
+  echo "==> Installing packages: $*"
+
+  if need_cmd apt-get; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y "$@"
+    return 0
+  fi
+
+  if need_cmd dnf; then
+    dnf install -y "$@"
+    return 0
+  fi
+
+  if need_cmd yum; then
+    yum install -y "$@"
+    return 0
+  fi
+
+  if need_cmd zypper; then
+    zypper --non-interactive install "$@"
+    return 0
+  fi
+
+  if need_cmd apk; then
+    apk add --no-cache "$@"
+    return 0
+  fi
+
+  echo "ERROR: No supported package manager found to install: $*" >&2
+  exit 1
+}
+
+ensure_curl() {
+  if need_cmd curl; then
+    return 0
+  fi
+
+  echo "==> curl not found. Attempting to install it..."
+  install_packages curl
+
+  if ! need_cmd curl; then
+    echo "ERROR: curl is required but could not be installed." >&2
+    exit 1
+  fi
+}
+
+require_cmd_or_fail() {
+  local cmd="$1"
+  local help_msg="${2:-}"
+
+  if ! need_cmd "$cmd"; then
+    echo "ERROR: Missing dependency: $cmd" >&2
+    if [ -n "$help_msg" ]; then
+      echo "$help_msg" >&2
+    fi
+    exit 1
+  fi
+}
+
+ensure_curl
+
+require_cmd_or_fail docker "Install Docker first, then rerun ./install.sh"
 
 # Docker compose detection
 if docker compose version >/dev/null 2>&1; then
@@ -61,7 +124,8 @@ if docker compose version >/dev/null 2>&1; then
 elif command -v docker-compose >/dev/null 2>&1; then
   DOCKER_COMPOSE=(docker-compose)
 else
-  echo "Docker Compose not found." >&2
+  echo "ERROR: Docker Compose not found." >&2
+  echo "Install the Docker Compose plugin or docker-compose, then rerun ./install.sh" >&2
   exit 1
 fi
 
@@ -117,7 +181,7 @@ services:
       - "${LISTEN}:${PORT}:8787"
 OVR
 
-echo "==> Starting containers…"
+echo "==> Starting containers..."
 
 pushd "$INSTALL_DIR" >/dev/null
 
@@ -129,12 +193,13 @@ fi
 
 popd >/dev/null
 
+LOCAL_AGENT_INSTALL_OK="0"
+LOCAL_AGENT_CHECKIN_OK="0"
+
 # -------------------------------------------------------------------
 # Install local agent if enabled
 # -------------------------------------------------------------------
-
 if [[ "${INSTALL_LOCAL_AGENT:-1}" == "1" ]]; then
-
   echo
   echo "==> Waiting for Harry Brain to become ready..."
 
@@ -152,14 +217,14 @@ if [[ "${INSTALL_LOCAL_AGENT:-1}" == "1" ]]; then
     echo "WARNING: Harry Brain did not become ready in time." >&2
     echo "         Skipping local agent install." >&2
   else
-
+    echo "==> Harry Brain is ready."
     echo "==> Installing local Harry agent on this machine..."
 
     if [[ ! -f "$INSTALL_DIR/scripts/install-agent.sh" ]]; then
       echo "WARNING: Local agent installer not found." >&2
       echo "         Skipping local agent install." >&2
     else
-
+      set +e
       if command -v sudo >/dev/null 2>&1; then
         sudo env HARRY_BASE_URL="http://127.0.0.1:${PORT}" \
           bash "$INSTALL_DIR/scripts/install-agent.sh"
@@ -167,14 +232,33 @@ if [[ "${INSTALL_LOCAL_AGENT:-1}" == "1" ]]; then
         env HARRY_BASE_URL="http://127.0.0.1:${PORT}" \
           bash "$INSTALL_DIR/scripts/install-agent.sh"
       fi
+      INSTALL_EXIT=$?
+      set -e
 
+      if [[ "$INSTALL_EXIT" -eq 0 ]]; then
+        LOCAL_AGENT_INSTALL_OK="1"
+        echo "==> Local agent install completed."
+        echo "==> Waiting for first local check-in..."
+
+        for i in {1..30}; do
+          if curl -fsS "http://127.0.0.1:${PORT}/nodes" 2>/dev/null | grep -q "\"node\":\"${BRAIN_NODE_NAME}\""; then
+            LOCAL_AGENT_CHECKIN_OK="1"
+            break
+          fi
+          sleep 1
+        done
+
+        if [[ "$LOCAL_AGENT_CHECKIN_OK" == "1" ]]; then
+          echo "==> Local node check-in confirmed."
+        else
+          echo "==> Local agent is bootstrapping. First check-in has not appeared yet."
+        fi
+      else
+        echo "WARNING: Local agent installer exited with code ${INSTALL_EXIT}." >&2
+      fi
     fi
-
   fi
-
 fi
-
-echo "==> Local node registered with Harry"
 
 # -------------------------------------------------------------------
 # Final success output
@@ -195,5 +279,17 @@ echo
 echo "UI:     http://${HOST_IP}:${PORT}/"
 echo "Health: http://${HOST_IP}:${PORT}/health"
 echo "Dist:   http://${HOST_IP}:${PORT}/dist/harry_agent.sh"
+
+if [[ "${INSTALL_LOCAL_AGENT:-1}" == "1" ]]; then
+  echo
+  if [[ "$LOCAL_AGENT_INSTALL_OK" == "1" && "$LOCAL_AGENT_CHECKIN_OK" == "1" ]]; then
+    echo "Local agent: installed and checked in."
+  elif [[ "$LOCAL_AGENT_INSTALL_OK" == "1" ]]; then
+    echo "Local agent: installed and bootstrapping."
+  else
+    echo "Local agent: not confirmed."
+  fi
+fi
+
 echo
 echo "Tip: If you're going internet-facing, put this behind a reverse proxy + HTTPS."
