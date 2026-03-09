@@ -1,4 +1,5 @@
 # 🧠 Harry — HARdware Review buddY
+
 Hardware awareness for small infrastructure environments.
 
 Experimental • Home Lab Tool • Quiet Infrastructure
@@ -8,19 +9,19 @@ Experimental • Home Lab Tool • Quiet Infrastructure
 
 ![Harry Dashboard](assets/harry-dashboard.png)
 
-Harry is a lightweight hardware awareness layer for small multi-node home labs.
+Harry is a lightweight **hardware awareness layer** for small multi-node home labs.
 
 It exists because a thing happened:
 
 > I was no longer managing infrastructure — I was remembering it.
 
-Harry reduces cognitive overload by keeping a small fleet visible, comparable, and contract-validated.
+Harry reduces cognitive overload by keeping a small fleet **visible, comparable, and contract-validated**.
 
 If it runs quietly for years, we’ve won. **Boring is good.**
 
 ---
 
-## Quick Start
+# Quick Start
 
 Latest release notes:
 https://github.com/samuelwhite/Harry/releases
@@ -32,6 +33,7 @@ git clone https://github.com/samuelwhite/Harry.git
 cd Harry
 ./install.sh
 ```
+
 The installing host automatically registers itself as a node.
 
 Open:
@@ -40,16 +42,17 @@ Open:
 http://localhost:8787
 ```
 
-Install an agent on a node:
+Install an agent on another node:
 
 ```
 export HARRY_BASE_URL="http://<brain-host>:8787"
+
 curl -fsSL "$HARRY_BASE_URL/scripts/install-agent.sh" | sudo -E bash
 ```
 
 ---
 
-## Contents
+# Contents
 
 * [What Harry is (and isn’t)](#what-harry-is-and-isnt)
 * [Philosophy](#philosophy)
@@ -96,7 +99,7 @@ It assumes:
 * you don’t want to run a full observability stack
 * you want quick answers to simple questions like:
 
-> "Which machine is about to become a problem?"
+> “Which machine is about to become a problem?”
 
 Harry intentionally does **very little**, but tries to do it reliably.
 
@@ -139,17 +142,13 @@ C --> G[Fleet Dashboard UI]
 
 FastAPI + SQLite service.
 
-Endpoints:
+Responsibilities:
 
-`/` — UI
-`/health` — health check
-`/doctor` — diagnostic report
-`/doctor.json` — machine diagnostics
-`/api` — API info
-`/ingest` — snapshot ingest
-`/schema/harry/{version}` — schema distribution
-`/dist/harry_agent.sh` — agent distribution
-`/scripts/install-agent.sh` — agent installer
+* ingest validated snapshots
+* compute node health signals
+* store historical data
+* expose fleet UI
+* expose simple operational APIs
 
 ---
 
@@ -165,37 +164,83 @@ Responsibilities:
 * send snapshot to Brain
 * self-update automatically
 
+Agents run every **5 minutes** by default.
+
 ---
 
 # Useful Endpoints
 
-Harry intentionally exposes a very small set of endpoints.
+Harry intentionally exposes a small, stable API surface.
 
 ## UI
 
-`/`
+```
+/
+```
 
-Simple fleet overview UI.
+Fleet overview dashboard.
 
 ---
 
 ## Health
 
-`/health`
+```
+/health
+```
 
-Minimal health check used by container healthchecks and monitoring.
+Minimal service health check.
 
-Returns version information and distribution status.
+Used by container healthchecks and monitoring tools.
+
+---
+
+## Version
+
+```
+/version
+```
+
+Returns version compatibility information:
+
+```
+brain_version
+agent_expected
+schema_current
+```
+
+Useful for tooling and debugging.
+
+---
+
+## Nodes
+
+```
+/nodes
+```
+
+Returns a fleet summary including:
+
+* node name
+* last_seen timestamp
+* agent_version
+* schema_version
+* health state
+* CPU load
+* RAM usage
+* disk utilisation
+* hardware model
+
+This endpoint is designed for future automation and integrations.
 
 ---
 
 ## Doctor Harry
 
-`/doctor`
+```
+/doctor
+```
 
 Human-readable diagnostic report.
-
-Useful for quickly checking database access, snapshot status, and node freshness.
 
 Example output:
 
@@ -205,40 +250,47 @@ Doctor Harry
 ok: True
 brain_version: 2026.03.08
 agent_version: 0.2.3
+fleet_nodes: 1
+fleet_worst_state: healthy
 ```
 
 ---
 
 ## Doctor (JSON)
 
-`/doctor.json`
+```
+/doctor.json
+```
 
 Machine-readable diagnostics endpoint.
 
-Intended for automation, scripts, and monitoring integrations.
+Useful for scripts, monitoring systems, or external tools.
 
 ---
 
 ## Agent Distribution
 
-`/dist/harry_agent.sh`
+```
+/dist/harry_agent.sh
+```
 
-Serves the current agent version to nodes.
+Serves the current agent version.
 
-Agents check this automatically during execution and self-update if needed.
+Agents automatically check this and self-update when necessary.
 
 ---
 
 ## Agent Installer
 
-`/scripts/install-agent.sh`
+```
+/scripts/install-agent.sh
+```
 
-Convenience installer for nodes.
-
-Used by the standard installation command:
+Convenience installer used by:
 
 ```
 export HARRY_BASE_URL="http://<brain-host>:8787"
+
 curl -fsSL "$HARRY_BASE_URL/scripts/install-agent.sh" | sudo -E bash
 ```
 
@@ -246,18 +298,24 @@ curl -fsSL "$HARRY_BASE_URL/scripts/install-agent.sh" | sudo -E bash
 
 # Quick Diagnostics
 
-Once the Brain is running, you can quickly verify system health.
+Once the Brain is running:
 
-Human-readable report:
+Human-readable:
 
 ```
 curl http://<brain-host>:8787/doctor
 ```
 
-Structured JSON output:
+Structured output:
 
 ```
 curl http://<brain-host>:8787/doctor.json
+```
+
+Fleet summary:
+
+```
+curl http://<brain-host>:8787/nodes
 ```
 
 ---
@@ -275,7 +333,7 @@ Run:
 ./install.sh
 ```
 
-Optional:
+Optional parameters:
 
 ```
 ./install.sh --listen 127.0.0.1
@@ -330,7 +388,7 @@ Updating the Brain agent file updates the entire fleet.
 
 # Security notes
 
-Agents only push data.
+Agents only **push data**.
 
 The Brain **never SSHs into nodes**.
 
