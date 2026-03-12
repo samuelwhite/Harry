@@ -4,8 +4,8 @@ import os
 import socket
 import subprocess
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 
 try:
     import psutil
@@ -15,9 +15,7 @@ except ImportError:
 
 AGENT_VERSION = "0.2.3-windows-dev"
 SCHEMA_VERSION = "0.2.3"
-
-BRAIN_URL = os.environ.get("HARRY_BASE_URL", "http://127.0.0.1:8787").rstrip("/")
-ENDPOINT = f"{BRAIN_URL}/ingest"
+CONFIG_PATH = r"C:\ProgramData\Harry\agent_config.json"
 POLL_SECONDS = 30
 
 
@@ -25,17 +23,35 @@ def iso_now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def load_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+config = load_config()
+BRAIN_URL = (
+    config.get("brain_url")
+    or os.environ.get("HARRY_BASE_URL")
+    or "http://127.0.0.1:8787"
+).rstrip("/")
+ENDPOINT = f"{BRAIN_URL}/ingest"
+
+
 def run_ps_one_line(ps: str) -> str | None:
     try:
-        r = subprocess.run(
+        result = subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        if r.returncode != 0:
+        if result.returncode != 0:
             return None
-        out = (r.stdout or "").strip()
+        out = (result.stdout or "").strip()
         return out or None
     except Exception:
         return None
@@ -54,7 +70,16 @@ def get_bios_version() -> str | None:
 
 
 def get_cpu_name() -> str | None:
-    return run_ps_one_line("(Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)")
+    return run_ps_one_line(
+        "(Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)"
+    )
+
+
+def get_cpu_cores() -> int | None:
+    try:
+        return psutil.cpu_count(logical=True)
+    except Exception:
+        return None
 
 
 def get_ram_total_gb() -> int | None:
@@ -67,6 +92,8 @@ def get_ram_total_gb() -> int | None:
 
 def get_cpu_load_1m() -> float | None:
     try:
+        # Windows does not expose Linux load average in the same way.
+        # Use CPU utilisation as a temporary surrogate.
         return round(psutil.cpu_percent(interval=1) / 100.0, 2)
     except Exception:
         return None
@@ -86,26 +113,47 @@ def get_disk_used_pct() -> float | None:
         return None
 
 
-def build_payload() -> dict:
-    hostname = get_hostname()
-    disk_used_pct = get_disk_used_pct()
+def get_disk_size_gb() -> float | None:
+    try:
+        total_bytes = psutil.disk_usage("C:\\").total
+        return round(total_bytes / (1024 ** 3), 2)
+    except Exception:
+        return None
 
-    return {
-        "node": hostname,
-        "agent_version": AGENT_VERSION,
+
+def build_payload() -> dict:
+    now = iso_now()
+    hostname = get_hostname()
+
+    payload = {
         "schema_version": SCHEMA_VERSION,
-        "ts": iso_now(),
+        "agent_version": AGENT_VERSION,
+        "node": hostname,
+        "ts": now,
         "agent_status": {
+            "state": "running",
+            "stage": "collecting",
             "ok": True,
             "error_code": None,
             "error_summary": None,
+            "consecutive_failures": 0,
+            "last_run_at": now,
+            "last_success_at": now,
+            "last_error_at": None,
         },
         "facts": {
             "hostname": hostname,
             "model": get_model(),
-            "bios_version": get_bios_version(),
             "cpu": get_cpu_name(),
+            "cpu_cores": get_cpu_cores(),
             "ram_total_gb": get_ram_total_gb(),
+            "ram_max_gb": None,
+            "ram_slots_total": None,
+            "ram_slots_used": None,
+            "ram_type": None,
+            "bios_release_date": None,
+            "bios_version": get_bios_version(),
+            "disks": [],
             "gpus": [],
             "extensions": {},
         },
@@ -114,9 +162,10 @@ def build_payload() -> dict:
             "mem_used_pct": get_mem_used_pct(),
             "disk_used": [
                 {
-                    "mount": "C:\\",
-                    "used_pct": disk_used_pct,
                     "fs": "NTFS",
+                    "mount": "C:\\",
+                    "used_pct": get_disk_used_pct(),
+                    "size_gb": get_disk_size_gb(),
                 }
             ],
             "temps_c": {},
@@ -124,11 +173,16 @@ def build_payload() -> dict:
             "extensions": {},
         },
         "derived": {
-            "health": {"state": "unknown", "worst_severity": "unknown", "reasons": []},
+            "health": {
+                "state": "unknown",
+                "worst_severity": "unknown",
+                "reasons": [],
+            },
             "extensions": {},
         },
         "advice": [],
     }
+    return payload
 
 
 def send(payload: dict) -> None:
@@ -139,6 +193,7 @@ def send(payload: dict) -> None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
+
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             body = resp.read().decode("utf-8", errors="replace")
