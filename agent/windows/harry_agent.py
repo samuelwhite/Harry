@@ -1,5 +1,4 @@
 import json
-import math
 import os
 import socket
 import subprocess
@@ -47,12 +46,30 @@ def run_ps_one_line(ps: str) -> str | None:
             ["powershell", "-NoProfile", "-Command", ps],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=8,
         )
         if result.returncode != 0:
             return None
         out = (result.stdout or "").strip()
         return out or None
+    except Exception:
+        return None
+
+
+def run_ps_json(ps: str):
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True,
+            text=True,
+            timeout=12,
+        )
+        if result.returncode != 0:
+            return None
+        out = (result.stdout or "").strip()
+        if not out:
+            return None
+        return json.loads(out)
     except Exception:
         return None
 
@@ -69,6 +86,24 @@ def get_bios_version() -> str | None:
     return run_ps_one_line("(Get-CimInstance Win32_BIOS).SMBIOSBIOSVersion")
 
 
+def get_bios_release_date() -> str | None:
+    ps = r"""
+$dt = (Get-CimInstance Win32_BIOS).ReleaseDate
+if ($dt) {
+  try {
+    [System.Management.ManagementDateTimeConverter]::ToDateTime($dt).ToString("yyyy-MM-dd")
+  } catch {
+    try {
+      (Get-Date $dt).ToString("yyyy-MM-dd")
+    } catch {
+      $null
+    }
+  }
+}
+"""
+    return run_ps_one_line(ps)
+
+
 def get_cpu_name() -> str | None:
     return run_ps_one_line(
         "(Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)"
@@ -82,18 +117,99 @@ def get_cpu_cores() -> int | None:
         return None
 
 
-def get_ram_total_gb() -> int | None:
-    try:
-        total_bytes = psutil.virtual_memory().total
-        return int(math.ceil(total_bytes / (1024 ** 3)))
-    except Exception:
-        return None
+def get_memory_info() -> dict:
+    ps = r"""
+$mods = Get-CimInstance Win32_PhysicalMemory | Select-Object BankLabel, Capacity, SMBIOSMemoryType, Speed, Manufacturer, PartNumber
+$arr  = Get-CimInstance Win32_PhysicalMemoryArray | Select-Object MemoryDevices, MaxCapacity
+
+[pscustomobject]@{
+  modules = @($mods)
+  arrays  = @($arr)
+} | ConvertTo-Json -Compress -Depth 4
+"""
+    data = run_ps_json(ps)
+    info = {
+        "ram_total_gb": None,
+        "ram_slots_total": None,
+        "ram_slots_used": None,
+        "ram_type": None,
+        "ram_max_gb": None,
+    }
+    if not data:
+        return info
+
+    modules = data.get("modules") or []
+    arrays = data.get("arrays") or []
+
+    if isinstance(modules, dict):
+        modules = [modules]
+    if isinstance(arrays, dict):
+        arrays = [arrays]
+
+    total_bytes = 0
+    used = 0
+    ram_type = None
+
+    type_map = {
+        "20": "DDR",
+        "21": "DDR2",
+        "24": "DDR3",
+        "26": "DDR4",
+        "34": "DDR5",
+    }
+
+    for mod in modules:
+        cap = mod.get("Capacity")
+        try:
+            if cap:
+                total_bytes += int(cap)
+                used += 1
+        except Exception:
+            pass
+
+        mt = mod.get("SMBIOSMemoryType")
+        if mt is not None and ram_type is None:
+            ram_type = type_map.get(str(mt).strip())
+
+    if total_bytes > 0:
+        gb = total_bytes / (1024 ** 3)
+        info["ram_total_gb"] = int(gb) if gb.is_integer() else round(gb, 1)
+
+    if used > 0:
+        info["ram_slots_used"] = used
+
+    slots_total = 0
+    for arr in arrays:
+        try:
+            md = arr.get("MemoryDevices")
+            if md:
+                slots_total += int(md)
+        except Exception:
+            pass
+    if slots_total > 0:
+        info["ram_slots_total"] = slots_total
+
+    # Many systems report silly/unsafe max values here, so keep it conservative.
+    max_vals = []
+    for arr in arrays:
+        try:
+            mc = arr.get("MaxCapacity")
+            if mc:
+                # Win32_PhysicalMemoryArray MaxCapacity is in KB
+                gb = int(mc) / 1024 / 1024
+                if 1 <= gb <= 128:
+                    max_vals.append(int(round(gb)))
+        except Exception:
+            pass
+    if max_vals:
+        info["ram_max_gb"] = sum(max_vals)
+
+    info["ram_type"] = ram_type
+    return info
 
 
 def get_cpu_load_1m() -> float | None:
     try:
-        # Windows does not expose Linux load average in the same way.
-        # Use CPU utilisation as a temporary surrogate.
         return round(psutil.cpu_percent(interval=1) / 100.0, 2)
     except Exception:
         return None
@@ -121,9 +237,46 @@ def get_disk_size_gb() -> float | None:
         return None
 
 
+def get_disks() -> list[dict]:
+    ps = r"""
+$items = Get-CimInstance Win32_DiskDrive | Select-Object Model, SerialNumber, Size, MediaType
+$items | ConvertTo-Json -Compress
+"""
+    data = run_ps_json(ps)
+    if not data:
+        return []
+
+    if isinstance(data, dict):
+        data = [data]
+
+    disks = []
+    for d in data:
+        size_gb = None
+        try:
+            if d.get("Size"):
+                size_gb = round(int(d["Size"]) / (1024 ** 3), 1)
+        except Exception:
+            pass
+
+        media = (d.get("MediaType") or "").strip() or None
+
+        disks.append(
+            {
+                "name": d.get("Model") or "disk",
+                "type": None,
+                "size_gb": size_gb,
+                "model": d.get("Model"),
+                "serial": d.get("SerialNumber"),
+                "media_type": media,
+            }
+        )
+    return disks
+
+
 def build_payload() -> dict:
     now = iso_now()
     hostname = get_hostname()
+    mem = get_memory_info()
 
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -146,14 +299,14 @@ def build_payload() -> dict:
             "model": get_model(),
             "cpu": get_cpu_name(),
             "cpu_cores": get_cpu_cores(),
-            "ram_total_gb": get_ram_total_gb(),
-            "ram_max_gb": None,
-            "ram_slots_total": None,
-            "ram_slots_used": None,
-            "ram_type": None,
-            "bios_release_date": None,
+            "ram_total_gb": mem["ram_total_gb"],
+            "ram_max_gb": mem["ram_max_gb"],
+            "ram_slots_total": mem["ram_slots_total"],
+            "ram_slots_used": mem["ram_slots_used"],
+            "ram_type": mem["ram_type"],
+            "bios_release_date": get_bios_release_date(),
             "bios_version": get_bios_version(),
-            "disks": [],
+            "disks": get_disks(),
             "gpus": [],
             "extensions": {},
         },
