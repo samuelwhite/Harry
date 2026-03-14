@@ -23,10 +23,38 @@ If it runs quietly for years, we’ve won. **Boring is good.**
 
 # Quick Start
 
-Latest release notes:
+## Windows
+
+Download the latest installer from:
+
 https://github.com/samuelwhite/Harry/releases
 
-Clone and start the Brain:
+Run:
+
+```
+HarryBrainSetup.exe
+```
+
+The installer will:
+
+• install **Harry Brain**  
+• install the **Windows Agent**  
+• start both services  
+• open the local dashboard  
+
+Then open:
+
+```
+http://localhost:8787
+```
+
+Your machine will automatically register as the first node.
+
+---
+
+## Linux Brain
+
+Clone and install:
 
 ```
 git clone https://github.com/samuelwhite/Harry.git
@@ -34,15 +62,18 @@ cd Harry
 ./install.sh
 ```
 
+After install:
+
+```
+UI:     http://<host>:8787
+Health: http://<host>:8787/health
+```
+
 The installing host automatically registers itself as a node.
 
-Open:
+---
 
-```
-http://localhost:8787
-```
-
-Install an agent on another node:
+## Install an Agent on another machine
 
 ```
 export HARRY_BASE_URL="http://<brain-host>:8787"
@@ -137,6 +168,8 @@ C --> F[Schema Distribution]
 
 C --> G[Fleet Dashboard UI]
 ```
+
+---
 
 ## Brain
 
