@@ -12,7 +12,7 @@ except ImportError:
     print("psutil not installed")
     raise SystemExit(1)
 
-AGENT_VERSION = "0.2.3-windows-dev"
+AGENT_VERSION = "0.2.3"
 SCHEMA_VERSION = "0.2.3"
 CONFIG_PATH = r"C:\ProgramData\Harry\agent_config.json"
 POLL_SECONDS = 30
@@ -189,14 +189,11 @@ $arr  = Get-CimInstance Win32_PhysicalMemoryArray | Select-Object MemoryDevices,
     if slots_total > 0:
         info["ram_slots_total"] = slots_total
 
-    # Try MaxCapacityEx first, then fall back to MaxCapacity.
-    # Many OEM systems report unrealistic maximums, so stay conservative.
     max_vals = []
     for arr in arrays:
         try:
             mcx = arr.get("MaxCapacityEx")
             if mcx:
-                # MaxCapacityEx is in bytes
                 gb = int(mcx) / (1024 ** 3)
                 if 1 <= gb <= 128:
                     max_vals.append(int(round(gb)))
@@ -207,7 +204,6 @@ $arr  = Get-CimInstance Win32_PhysicalMemoryArray | Select-Object MemoryDevices,
         try:
             mc = arr.get("MaxCapacity")
             if mc:
-                # MaxCapacity is in KB
                 gb = int(mc) / 1024 / 1024
                 if 1 <= gb <= 128:
                     max_vals.append(int(round(gb)))
@@ -288,10 +284,68 @@ $items | ConvertTo-Json -Compress
     return disks
 
 
+def get_gpus() -> list[dict]:
+    ps = r"""
+$items = Get-CimInstance Win32_VideoController |
+  Select-Object Name, AdapterRAM, DriverVersion, VideoProcessor, PNPDeviceID |
+  Where-Object { $_.Name -and $_.Name.Trim() -ne "" }
+
+$items | ConvertTo-Json -Compress
+"""
+    data = run_ps_json(ps)
+    if not data:
+        return []
+
+    if isinstance(data, dict):
+        data = [data]
+
+    gpus = []
+    seen = set()
+
+    for g in data:
+        name = (g.get("Name") or "").strip()
+        if not name:
+            continue
+
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        vram_mb = None
+        try:
+            if g.get("AdapterRAM") is not None:
+                vram_mb = int(int(g["AdapterRAM"]) / (1024 * 1024))
+        except Exception:
+            pass
+
+        pnp = (g.get("PNPDeviceID") or "").upper()
+        integrated = False
+
+        lower_name = name.lower()
+        if "vega" in lower_name or "radeon(tm)" in lower_name:
+            integrated = True
+        if "PCI\\VEN_" in pnp:
+            integrated = False if "NVIDIA" in name.upper() or "GEFORCE" in name.upper() else integrated
+
+        gpus.append(
+            {
+                "name": name,
+                "vram_mb": vram_mb,
+                "driver": g.get("DriverVersion"),
+                "video_processor": g.get("VideoProcessor"),
+                "integrated": integrated,
+            }
+        )
+
+    return gpus
+
+
 def build_payload() -> dict:
     now = iso_now()
     hostname = get_hostname()
     mem = get_memory_info()
+    gpus = get_gpus()
 
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -322,7 +376,7 @@ def build_payload() -> dict:
             "bios_release_date": get_bios_release_date(),
             "bios_version": get_bios_version(),
             "disks": get_disks(),
-            "gpus": [],
+            "gpus": gpus,
             "extensions": {},
         },
         "metrics": {

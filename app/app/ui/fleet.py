@@ -5,15 +5,17 @@ import os
 from dataclasses import dataclass
 from statistics import mean
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from app.health import compute_health
 from app.rules import evaluate as rules_evaluate
 from app.versions import AGENT_VERSION, BRAIN_VERSION
-from .db import (
+from app.ui.db import (
     STALE_SECONDS,
     _db,
     _fnum,
     _fetch_history,
+    _fetch_latest_hidden_per_node,
     _get_facts,
     _get_metrics,
     _load_schema_current,
@@ -23,7 +25,7 @@ from .db import (
     _utcnow,
     _clamp,
 )
-from .templates import (
+from app.ui.templates import (
     JS_PULSE,
     _ago,
     _badge_text,
@@ -150,10 +152,10 @@ def _ram_total_display(facts: Dict[str, Any], raw_facts: Dict[str, Any]) -> str:
         ram_type = src.get("ram_type")
 
         if ram_total_gb:
-            if ram_max_gb is not None:
+            if ram_max_gb and str(ram_max_gb) != str(ram_total_gb):
                 base = f"{ram_total_gb}GB / {ram_max_gb}GB"
             else:
-                base = f"{ram_total_gb}GB / ?"
+                base = f"{ram_total_gb}GB / {ram_total_gb}GB"
         else:
             base = "—"
 
@@ -177,6 +179,8 @@ def _map_engine_sev(sev: str) -> str:
         return "warn"
     if s in ("ok", "green"):
         return "ok"
+    if s == "info":
+        return "info"
     if s == "":
         return "ok"
     return s
@@ -227,7 +231,7 @@ def _advice_normalised_snapshot(snapshot: Dict[str, Any]) -> List[Dict[str, Any]
             gap = int(rm - rt)
             out.append(
                 {
-                    "severity": "warn",
+                    "severity": "info",
                     "message": f"RAM headroom available: {int(rt)}GB installed, supports {int(rm)}GB. (+{gap}GB potential).",
                     "evidence": {"ram_total_gb": rt, "ram_max_gb": rm},
                 }
@@ -235,6 +239,8 @@ def _advice_normalised_snapshot(snapshot: Dict[str, Any]) -> List[Dict[str, Any]
     except Exception:
         pass
 
+    sev_rank = {"bad": 0, "warn": 1, "info": 2, "ok": 3}
+    out.sort(key=lambda a: (sev_rank.get(str(a.get("severity") or "ok").lower(), 9), str(a.get("message") or "").lower()))
     return out
 
 
@@ -608,6 +614,19 @@ def _agent_version_state(actual: str, expected: str) -> str:
     return "behind"
 
 
+def _node_action_url(node: str, action: str, next_url: str) -> str:
+    return f"/node/{quote(node, safe='')}/{action}?next={quote(next_url, safe='')}"
+
+
+def _action_form(url: str, label: str, confirm_text: Optional[str] = None) -> str:
+    confirm_attr = f' onclick="return confirm(\'{_html_escape(confirm_text)}\')"' if confirm_text else ""
+    return (
+        f'<form method="post" action="{_html_escape(url)}" style="display:inline-block; margin:0 6px 6px 0;">'
+        f'<button class="btn" type="submit"{confirm_attr}>{_html_escape(label)}</button>'
+        f"</form>"
+    )
+
+
 @dataclass
 class NodeView:
     node: str
@@ -711,6 +730,7 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
 
     advice = list(_advice_normalised_snapshot(payload))
     advice.extend(_cpu_pressure_advice(cpu_pressure_now, cpu_pressure_avg_72h, cpu_pressure_peak_72h))
+    advice.sort(key=lambda a: ({"bad": 0, "warn": 1, "info": 2, "ok": 3}.get(str(a.get("severity") or "ok").lower(), 9), str(a.get("message") or "").lower()))
 
     delayed = health_state == "warning" and any("delayed" in str(r).lower() for r in (health.get("reasons") or []))
 
@@ -819,7 +839,7 @@ def _top_action(nv: NodeView) -> Optional[Tuple[str, str]]:
         return ("stale", f"Stopped reporting ({_ago(nv.ts)}).")
     if not nv.advice:
         return None
-    for sev in ("bad", "warn"):
+    for sev in ("bad", "warn", "info"):
         for a in nv.advice:
             if str(a.get("severity") or "").lower() == sev:
                 msg = _safe_str(a.get("message") or "").strip()
@@ -879,7 +899,7 @@ def _render_advice(advice: List[Dict[str, Any]]) -> str:
     for a in advice[:10]:
         sev = str(a.get("severity") or "ok").lower()
         msg = _safe_str(a.get("message") or "")
-        tag_class = "warn" if sev == "info" else sev
+        tag_class = "info" if sev == "info" else sev
         out.append(
             f"<div class='adviceitem'><span class='tag {tag_class}'>{_html_escape(sev)}</span>"
             f"<span class='msg'>{_html_escape(msg)}</span></div>"
@@ -950,7 +970,7 @@ def _render_top_banner(nodes: List[NodeView]) -> str:
                 msg = f"{nv.node} — Warning."
             pills.append(f"<span class='topwarn {nv.worst}'>{_html_escape(msg)}</span>")
     if not pills:
-        return ""
+        pills.append("<span class='topwarn ok'>Nothing to report… yet.</span>")
     return f"<div class='topwarnwrap'>{''.join(pills)}</div>"
 
 
@@ -1124,9 +1144,10 @@ def _render_fleet_map(nodeviews: List[NodeView], brain_name: str) -> str:
     svg.append("</svg>")
     return "".join(svg)
 
-
-def _render_inventory_table(nodeviews: List[NodeView]) -> str:
+def _render_inventory_table(nodeviews: List[NodeView], hours: int) -> str:
     rows: List[str] = []
+    next_url = f"/?hours={hours}"
+
     for nv in nodeviews:
         dot = _sev_dot(nv.worst)
         model = nv.model or "—"
@@ -1151,6 +1172,8 @@ def _render_inventory_table(nodeviews: List[NodeView]) -> str:
             ta = _top_action(nv)
             hint = (ta[1] if ta else f"CPU {nv.cpu_pressure_band}")
 
+        hide_btn = _action_form(_node_action_url(nv.node, "hide", next_url), "Hide")
+
         rows.append(
             f"""
 <tr>
@@ -1164,6 +1187,7 @@ def _render_inventory_table(nodeviews: List[NodeView]) -> str:
   <td class="mono">{_html_escape(bios)}</td>
   <td class="mono">{_html_escape(last)}</td>
   <td class="advicecol">{adv}<div class="advsmall">{_html_escape(hint)}</div></td>
+  <td>{hide_btn}</td>
 </tr>
 """
         )
@@ -1179,6 +1203,7 @@ def _render_inventory_table(nodeviews: List[NodeView]) -> str:
       <th>BIOS</th>
       <th>Last seen</th>
       <th>Advice</th>
+      <th>Actions</th>
     </tr>
   </thead>
   <tbody>
@@ -1189,37 +1214,42 @@ def _render_inventory_table(nodeviews: List[NodeView]) -> str:
 
 
 def _render_advice_queue(nodeviews: List[NodeView]) -> str:
-    items: List[Tuple[int, str, NodeView, str]] = []
+    items: List[Tuple[int, float, str, str, str, str]] = []
+
+    sev_rank = {"stale": 0, "bad": 1, "warn": 2, "info": 3}
+
     for nv in nodeviews:
         if nv.stale:
-            items.append((0, "stale", nv, f"Stopped reporting (last seen {_ago(nv.ts)})."))
+            items.append((0, -(nv.activity_score), nv.node, "STALE", f"Stopped reporting (last seen {_ago(nv.ts)}).", nv.model or ""))
             continue
 
-        sev = (nv.advice_sev or "ok").lower()
-        if sev in ("bad", "warn"):
-            ta = _top_action(nv)
-            msg = ta[1] if ta else "Recommendation available."
-            items.append((1 if sev == "bad" else 2, sev, nv, msg))
+        for a in nv.advice:
+            sev = str(a.get("severity") or "ok").lower()
+            if sev not in ("bad", "warn", "info"):
+                continue
+            msg = _safe_str(a.get("message") or "").strip()
+            if not msg:
+                continue
+            items.append((sev_rank.get(sev, 9), -(nv.activity_score), nv.node, sev.upper(), msg, nv.model or ""))
 
     if not items:
         return "<div class='muted'>No active recommendations.</div>"
 
-    items.sort(key=lambda t: (t[0], -(t[2].activity_score), t[2].node))
+    items.sort(key=lambda t: (t[0], t[1], t[2], t[4]))
+
     rows: List[str] = []
-    for _, sev, nv, msg in items[:18]:
-        label = "STALE" if sev == "stale" else ("BAD" if sev == "bad" else "WARN")
-        badge = _badge_text("stale" if sev == "stale" else sev, label)
-        ago = _ago(nv.ts)
+    for _, _, node, label, msg, model in items[:40]:
+        sev_cls = "stale" if label == "STALE" else label.lower()
+        badge = _badge_text(sev_cls, label)
         rows.append(
             f"""
 <div class="advrow">
   <div class="advleft">
-    <div class="advnode"><a href="/node/{_html_escape(nv.node)}">{_html_escape(nv.node)}</a> <span class="advsmall">{_html_escape(nv.model or '')}</span></div>
+    <div class="advnode"><a href="/node/{_html_escape(node)}">{_html_escape(node)}</a> <span class="advsmall">{_html_escape(model)}</span></div>
     <div class="advmsg">{_html_escape(msg)}</div>
   </div>
   <div class="advright">
     {badge}
-    <span class="advsmall">{_html_escape(ago)}</span>
   </div>
 </div>
 """
@@ -1353,6 +1383,44 @@ def _render_fleet_trends(nodeviews: List[NodeView], hours: int) -> str:
 """
 
 
+def _render_hidden_nodes(hidden_nodes: List[NodeView], hours: int) -> str:
+    if not hidden_nodes:
+        return ""
+
+    next_url = f"/?hours={hours}"
+    rows: List[str] = []
+
+    for nv in hidden_nodes:
+        rows.append(
+            f"""
+<div class="advrow">
+  <div class="advleft">
+    <div class="advnode">{_html_escape(nv.node)} <span class="advsmall">{_html_escape(nv.model or nv.cpu or '')}</span></div>
+    <div class="advmsg">Hidden from Fleet, Inventory, and Diagnostics. Last seen {_html_escape(_ago(nv.ts))}.</div>
+  </div>
+  <div class="advright">
+    {_action_form(_node_action_url(nv.node, "unhide", next_url), "Unhide")}
+    {_action_form(_node_action_url(nv.node, "delete", next_url), "Delete", "Delete this node and all of its history permanently?")}
+  </div>
+</div>
+"""
+        )
+
+    return f"""
+<div class="section">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">Hidden nodes</div>
+      <div class="h2sub">Excluded from the main interface until restored.</div>
+    </div>
+  </div>
+  <div class="advwrap">
+    {''.join(rows)}
+  </div>
+</div>
+"""
+
+
 def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
     dot = _sev_dot(nv.worst)
     model = f" ({nv.model})" if nv.model else ""
@@ -1384,11 +1452,12 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
 
     top_action = _top_action(nv)
     top_action_line = ""
-    if top_action and top_action[0] in ("bad", "warn", "stale"):
+    if top_action and top_action[0] in ("bad", "warn", "stale", "info"):
         sev, msg = top_action
+        pill_sev = "bad" if sev in ("bad", "stale") else ("warn" if sev == "warn" else "neutral")
         top_action_line = (
             f'<div style="margin-top:8px;">'
-            f'{_pill("bad" if sev in ("bad","stale") else "warn", "Recommendation")} '
+            f'{_pill(pill_sev, "Recommendation")} '
             f'<span class="muted" style="font-size:13px;">{_html_escape(msg)}</span>'
             f"</div>"
         )
@@ -1414,6 +1483,8 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
         if nv.load1 is not None:
             cpu_bits.append(f"load {nv.load1:.2f}")
         cpu_detail = " · ".join(cpu_bits)
+
+    hide_url = _node_action_url(nv.node, "hide", f"/?hours={hours}")
 
     return f"""
 <section class="card" id="node-{nv.node_id}">
@@ -1453,7 +1524,7 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
       <div class="bar ram"><div class="fill" style="width:{ram_pct:.1f}%"></div></div>
       <div class="rambottom">
         <div class="muted">Used: {_html_escape(used_label)}</div>
-        <div class="muted rightmuted">{_html_escape(nv.ram_total.splitlines()[1] if "\n" in nv.ram_total else "")}</div>
+        <div class="muted rightmuted">{_html_escape(nv.ram_total.splitlines()[1] if "\\n" in nv.ram_total else "")}</div>
       </div>
     </div>
   </div>
@@ -1478,6 +1549,10 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
 
     {debug_html}
 
+    <div class="actions" style="margin-top:12px;">
+      {_action_form(hide_url, "Hide node")}
+    </div>
+
     <div class="trendrow">
       {''.join(detail_trends)}
     </div>
@@ -1488,7 +1563,7 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
 
 def build_nodeviews(hours: int = 72) -> List[NodeView]:
     with _db() as conn:
-        from .db import _db_has_ingest, _fetch_latest_per_node
+        from app.ui.db import _db_has_ingest, _fetch_latest_per_node
 
         if not _db_has_ingest(conn):
             return []
@@ -1511,8 +1586,25 @@ def build_nodeviews(hours: int = 72) -> List[NodeView]:
     return nodeviews
 
 
+def build_hidden_nodeviews(hours: int = 72) -> List[NodeView]:
+    with _db() as conn:
+        from app.ui.db import _db_has_ingest
+
+        if not _db_has_ingest(conn):
+            return []
+
+        latest = _fetch_latest_hidden_per_node(conn)
+        nodeviews: List[NodeView] = []
+        for node, rec in latest.items():
+            nodeviews.append(build_node_view(conn, node, rec, hours=hours))
+
+    nodeviews.sort(key=lambda nv: nv.node)
+    return nodeviews
+
+
 def render_fleet_page(hours: int, debug: bool) -> str:
     nodeviews = build_nodeviews(hours=hours)
+    hidden_nodeviews = build_hidden_nodeviews(hours=hours)
     generated = _utcnow().isoformat().replace("+00:00", "Z")
     brain_name = (os.environ.get("HARRY_BRAIN_NODE") or "brain").strip()
     schema_current = _load_schema_current()
@@ -1524,6 +1616,7 @@ def render_fleet_page(hours: int, debug: bool) -> str:
 
     fleet_stats_html = _render_fleet_stats(nodeviews)
     trends_html = _render_fleet_trends(nodeviews, hours=hours)
+    hidden_html = _render_hidden_nodes(hidden_nodeviews, hours=hours)
 
     fleet_map_html = f"""
 <div class="section" id="fleet">
@@ -1562,7 +1655,7 @@ def render_fleet_page(hours: int, debug: bool) -> str:
     </div>
   </div>
   <div class="invwrap">
-    {_render_inventory_table(nodeviews)}
+    {_render_inventory_table(nodeviews, hours=hours)}
   </div>
 </div>
 """
@@ -1601,6 +1694,7 @@ def render_fleet_page(hours: int, debug: bool) -> str:
 {table_html}
 <div class="divider"></div>
 {trends_html}
+{hidden_html}
 {footer_versions_html}
 """
 
@@ -1612,6 +1706,11 @@ def render_diagnostics_panel(hours: int, debug: bool) -> str:
     stale_n = sum(1 for n in nodeviews if n.stale)
     bad_n = sum(1 for n in nodeviews if not n.stale and (n.advice_sev or "ok") == "bad")
     warn_n = sum(1 for n in nodeviews if not n.stale and (n.advice_sev or "ok") == "warn")
+    info_n = sum(
+        1
+        for n in nodeviews
+        if not n.stale and any(str(a.get("severity") or "").lower() == "info" for a in (n.advice or []))
+    )
     return f"""
 <div class="h1">HARRY — Diagnostics</div>
 <div class="sub">
@@ -1620,13 +1719,15 @@ def render_diagnostics_panel(hours: int, debug: bool) -> str:
   <span>{bad_n} bad</span>
   <span>·</span>
   <span>{warn_n} warn</span>
+  <span>·</span>
+  <span>{info_n} info</span>
 </div>
 {top_nav("diagnostics", hours, debug, len(nodeviews), stale_n + bad_n + warn_n)}
 <div class="section">
   <div class="sectionhead">
     <div>
       <div class="h2">Recommendations</div>
-      <div class="h2sub">The noisy bits.</div>
+      <div class="h2sub">Multiple findings, ordered by severity.</div>
     </div>
   </div>
   {_render_advice_queue(nodeviews)}
@@ -1651,6 +1752,3 @@ def render_node_cards_page(hours: int, debug: bool) -> str:
 </div>
 """
     return body
-
-
-

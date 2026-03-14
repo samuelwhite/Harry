@@ -17,6 +17,7 @@ CSS = """
   --muted: rgba(255,255,255,0.62);
 
   --ok: #34d399;
+  --info: #60a5fa;
   --warn: #fbbf24;
   --bad: #fb7185;
   --stale: #fb7185;
@@ -107,10 +108,10 @@ a:hover { text-decoration: underline; }
 
 .navchips {
   display:flex;
-  gap: 8px;
+  gap: 10px;
   flex-wrap:wrap;
   margin: 12px 0 20px;
-  padding: 8px;
+  padding: 10px;
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 18px;
   background: rgba(255,255,255,0.035);
@@ -129,13 +130,31 @@ a:hover { text-decoration: underline; }
   font-size: clamp(0.78rem, 1.5vw, 0.92rem);
   font-weight: 800;
   line-height: 1;
-  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease, opacity 0.12s ease;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease, opacity 0.12s ease, box-shadow 0.12s ease;
 }
 
 .chip:hover {
   background: rgba(255,255,255,0.07);
   border-color: rgba(255,255,255,0.14);
   text-decoration: none;
+}
+
+.chip.pagechip {
+  padding: 11px 16px;
+  min-height: 44px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.10);
+  font-size: clamp(0.9rem, 1.7vw, 1rem);
+  font-weight: 900;
+  letter-spacing: 0.15px;
+}
+
+.chip.pagechip:hover {
+  background: rgba(255,255,255,0.09);
+  border-color: rgba(255,255,255,0.18);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(0,0,0,0.16);
 }
 
 .chip.active {
@@ -421,6 +440,7 @@ a:hover { text-decoration: underline; }
 }
 
 .tag.ok { border-color: rgba(52,211,153,0.35); background: rgba(52,211,153,0.10); }
+.tag.info { border-color: rgba(96,165,250,0.35); background: rgba(96,165,250,0.10); }
 .tag.warn { border-color: rgba(251,191,36,0.35); background: rgba(251,191,36,0.10); }
 .tag.bad { border-color: rgba(251,113,133,0.35); background: rgba(251,113,133,0.10); }
 
@@ -1206,10 +1226,9 @@ def top_nav(active: str, hours: int, debug: bool, node_count: int, rec_count: in
 
     return f"""
 <div class="navchips">
-  {chip("Fleet", f"/?hours={hours}", active == "fleet", str(node_count))}
-  {chip("Inventory", f"/inventory?hours={hours}", active == "inventory")}
-  {chip("Diagnostics", f"/diagnostics?hours={hours}", active == "diagnostics", str(rec_count))}
+  {chip("Fleet", f"/?hours={hours}", active == "fleet", extra_cls="pagechip")}
+  {chip("Inventory", f"/inventory?hours={hours}", active == "inventory", extra_cls="pagechip")}
+  {chip("Diagnostics", f"/diagnostics?hours={hours}", active == "diagnostics", extra_cls="pagechip")}
   {debug_chip}
 </div>
 """
-

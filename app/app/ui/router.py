@@ -3,21 +3,24 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
-from .db import (
+from app.ui.db import (
     DUMP_DEFAULT_HOURS,
     _clamp,
     _db,
     _db_has_ingest,
     _fetch_latest_per_node,
     _utcnow,
+    delete_node,
     get_dump,
+    hide_node,
+    unhide_node,
 )
-from .diagnostics import render_diagnostics_page
-from .fleet import render_fleet_page
-from .inventory import _inventory_md, build_inventory_rows, render_inventory_page
-from .node import render_node_detail
+from app.ui.diagnostics import render_diagnostics_page
+from app.ui.fleet import render_fleet_page
+from app.ui.inventory import _inventory_md, build_inventory_rows, render_inventory_page
+from app.ui.node import render_node_detail
 
 router = APIRouter()
 
@@ -114,6 +117,27 @@ def diagnostics(request: Request) -> HTMLResponse:
     return HTMLResponse(render_diagnostics_page(hours=hours, debug=debug))
 
 
+@router.post("/node/{node}/hide")
+def node_hide(request: Request, node: str) -> RedirectResponse:
+    next_url = (request.query_params.get("next") or "/").strip() or "/"
+    hide_node(node.strip())
+    return RedirectResponse(url=next_url, status_code=303)
+
+
+@router.post("/node/{node}/unhide")
+def node_unhide(request: Request, node: str) -> RedirectResponse:
+    next_url = (request.query_params.get("next") or "/").strip() or "/"
+    unhide_node(node.strip())
+    return RedirectResponse(url=next_url, status_code=303)
+
+
+@router.post("/node/{node}/delete")
+def node_delete(request: Request, node: str) -> RedirectResponse:
+    next_url = (request.query_params.get("next") or "/").strip() or "/"
+    delete_node(node.strip())
+    return RedirectResponse(url=next_url, status_code=303)
+
+
 @router.get("/debug/latest/{node}")
 def debug_latest(node: str) -> JSONResponse:
     node = node.strip()
@@ -144,4 +168,3 @@ def node_detail(request: Request, node: str) -> HTMLResponse:
     hours = int(_clamp(hours, 1, 24 * 14))
 
     return HTMLResponse(render_node_detail(node=node.strip(), hours=hours))
-

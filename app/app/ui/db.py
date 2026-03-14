@@ -64,15 +64,28 @@ def _load_schema_current() -> str:
     except Exception:
         return "unknown"
 
+
+def _ensure_hidden_nodes_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS hidden_nodes (
+            node TEXT PRIMARY KEY,
+            hidden_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+
+
 def _db() -> sqlite3.Connection:
     db_path = Path(DB_PATH)
-
-    # Ensure directory exists
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    _ensure_hidden_nodes_table(conn)
     return conn
+
 
 def _db_has_ingest(conn: sqlite3.Connection) -> bool:
     try:
@@ -92,7 +105,10 @@ def _fetch_latest_per_node(conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]
       FROM ingest
       GROUP BY node
     ) latest
-    ON i1.node = latest.node AND i1.ts = latest.max_ts
+      ON i1.node = latest.node AND i1.ts = latest.max_ts
+    LEFT JOIN hidden_nodes h
+      ON i1.node = h.node
+    WHERE h.node IS NULL
     ORDER BY i1.node ASC
     LIMIT ?
     """
@@ -102,6 +118,36 @@ def _fetch_latest_per_node(conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]
         except Exception:
             payload = {"node": row["node"], "ts": row["ts"], "bad_payload": True, "raw": row["payload"]}
         out[row["node"]] = {"ts": row["ts"], "payload": payload, "row_id": row["id"]}
+    return out
+
+
+def _fetch_latest_hidden_per_node(conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    q = """
+    SELECT i1.*, h.hidden_at
+    FROM ingest i1
+    JOIN (
+      SELECT node, MAX(ts) AS max_ts
+      FROM ingest
+      GROUP BY node
+    ) latest
+      ON i1.node = latest.node AND i1.ts = latest.max_ts
+    JOIN hidden_nodes h
+      ON i1.node = h.node
+    ORDER BY i1.node ASC
+    LIMIT ?
+    """
+    for row in conn.execute(q, (MAX_NODES,)):
+        try:
+            payload = json.loads(row["payload"])
+        except Exception:
+            payload = {"node": row["node"], "ts": row["ts"], "bad_payload": True, "raw": row["payload"]}
+        out[row["node"]] = {
+            "ts": row["ts"],
+            "payload": payload,
+            "row_id": row["id"],
+            "hidden_at": row["hidden_at"],
+        }
     return out
 
 
@@ -150,6 +196,13 @@ def get_latest_node_records() -> Dict[str, Dict[str, Any]]:
         return _fetch_latest_per_node(conn)
 
 
+def get_latest_hidden_node_records() -> Dict[str, Dict[str, Any]]:
+    with _db() as conn:
+        if not _db_has_ingest(conn):
+            return {}
+        return _fetch_latest_hidden_per_node(conn)
+
+
 def get_latest_node_record(node: str):
     with _db() as conn:
         cur = conn.execute(
@@ -157,6 +210,42 @@ def get_latest_node_record(node: str):
             (node,),
         )
         return cur.fetchone()
+
+
+def hide_node(node: str) -> None:
+    node = (node or "").strip()
+    if not node:
+        return
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO hidden_nodes (node, hidden_at)
+            VALUES (?, ?)
+            ON CONFLICT(node) DO UPDATE SET hidden_at = excluded.hidden_at
+            """,
+            (node, _utcnow().isoformat().replace("+00:00", "Z")),
+        )
+        conn.commit()
+
+
+def unhide_node(node: str) -> None:
+    node = (node or "").strip()
+    if not node:
+        return
+    with _db() as conn:
+        conn.execute("DELETE FROM hidden_nodes WHERE node = ?", (node,))
+        conn.commit()
+
+
+def delete_node(node: str) -> None:
+    node = (node or "").strip()
+    if not node:
+        return
+    with _db() as conn:
+        conn.execute("DELETE FROM hidden_nodes WHERE node = ?", (node,))
+        if _db_has_ingest(conn):
+            conn.execute("DELETE FROM ingest WHERE node = ?", (node,))
+        conn.commit()
 
 
 def get_dump(hours: int = DUMP_DEFAULT_HOURS) -> Dict[str, Any]:
@@ -168,4 +257,3 @@ def get_dump(hours: int = DUMP_DEFAULT_HOURS) -> Dict[str, Any]:
             hist = _fetch_history(conn, node, hours=hours, limit=500)
             nodes[node] = {"latest": rec, "history": hist}
         return {"generated_at": _utcnow().isoformat().replace("+00:00", "Z"), "hours": hours, "nodes": nodes}
-
