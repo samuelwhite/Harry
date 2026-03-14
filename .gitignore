@@ -10,6 +10,10 @@ venv/
 .env/
 .env.*
 
+# Installer builds
+installers/windows/output/
+installers/windows/build/
+
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -35,3 +39,6 @@ tmp/
 secrets.yml
 *.key
 *.pem
+
+# Local backups
+_private_backups/
