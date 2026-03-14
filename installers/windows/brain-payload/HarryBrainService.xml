@@ -1,0 +1,12 @@
+<service>
+  <id>HarryBrain</id>
+  <name>Harry Brain</name>
+  <description>Harry Brain service</description>
+
+  <executable>brain_server.exe</executable>
+
+  <env name="HARRY_DB_PATH" value="C:\ProgramData\Harry\brain\data\harry.db"/>
+  <env name="HARRY_PORT" value="8787"/>
+
+  <log mode="roll"/>
+</service>

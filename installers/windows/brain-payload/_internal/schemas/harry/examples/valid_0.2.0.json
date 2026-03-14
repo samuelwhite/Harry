@@ -1,0 +1,116 @@
+{
+  "schema_version": "0.2.0",
+  "node": "jarvis",
+  "ts": "2026-02-26T21:15:00Z",
+
+  "facts": {
+    "hostname": "jarvis",
+    "model": "Dell OptiPlex 7050 Micro",
+    "cpu": "Intel Core i5-7500T",
+    "cpu_cores": 4,
+
+    "ram_total_gb": 16,
+    "ram_max_gb": 32,
+    "ram_slots_total": 2,
+    "ram_slots_used": 2,
+    "ram_type": "DDR4",
+
+    "bios_release_date": "2019-06-14",
+
+    "disks": [
+      {
+        "name": "sda",
+        "size_gb": 238.5,
+        "type": "ssd",
+        "serial": "PHYS123456",
+        "smart_power_on_hours": 10432
+      },
+      {
+        "name": "sdb",
+        "size_gb": 953.9,
+        "type": "hdd",
+        "serial": "DATA987654",
+        "smart_power_on_hours": 5821
+      }
+    ],
+
+    "gpus": []
+  },
+
+  "metrics": {
+    "cpu_load_1m": 0.82,
+    "mem_used_pct": 64.3,
+
+    "disk_used": [
+      {
+        "mount": "/",
+        "used_pct": 42.1,
+        "size_gb": 238.5
+      },
+      {
+        "mount": "/mnt/data",
+        "used_pct": 71.8,
+        "size_gb": 953.9
+      }
+    ],
+
+    "temps_c": {
+      "cpu": 58.2,
+      "nvme": 44.0
+    },
+
+    "gpu": [],
+
+    "extensions": {
+      "disk_physical": [
+        {
+          "name": "sda",
+          "used_pct": 42.1,
+          "size_gb": 238.5
+        },
+        {
+          "name": "sdb",
+          "used_pct": 71.8,
+          "size_gb": 953.9
+        }
+      ]
+    }
+  },
+
+  "derived": {
+    "health": {
+      "state": "amber",
+      "worst_severity": "warn",
+      "reasons": [
+        {
+          "code": "disk_physical_warn",
+          "severity": "warn",
+          "message": "Physical disk sdb is 71.8% utilised.",
+          "field": "metrics.extensions.disk_physical",
+          "value": 71.8
+        }
+      ]
+    },
+
+    "inventory_age_years_est": 6,
+    "ts_human": "Wed 26 Feb 2026 21:15",
+    "ts_relative": "just now"
+  },
+
+  "advice": [
+    {
+      "id": "disk_physical_warn_sdb",
+      "node": "jarvis",
+      "category": "storage",
+      "severity": "warn",
+      "message": "Data disk is over 70% utilised.",
+      "recommendation": "Consider pruning old backups or planning a storage upgrade.",
+      "confidence": 0.92,
+      "refs": [],
+      "evidence": {
+        "disk": "sdb",
+        "used_pct": 71.8
+      }
+    }
+  ]
+}

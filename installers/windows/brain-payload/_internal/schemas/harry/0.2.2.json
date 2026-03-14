@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/harry/0.2.2",
+  "title": "HARRY Snapshot Schema",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "node", "ts", "facts", "metrics", "derived", "advice"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "node": { "type": "string" },
+    "ts": { "type": "string" },
+    "facts": { "type": "object", "additionalProperties": true },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "disk_used": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mount", "used_pct"],
+            "properties": {
+              "mount": { "type": ["string", "null"] },
+              "used_pct": { "type": "number" },
+              "fs": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "temps_c": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": { "type": "number" }
+        },
+        "gpu": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string" },
+              "util_pct": { "type": "number" },
+              "temp_c": { "type": "number" },
+              "mem_total_mb": { "type": "number" },
+              "mem_used_mb": { "type": "number" },
+              "mem_used_pct": { "type": "number" },
+              "driver": { "type": "string" },
+              "bus_id": { "type": "string" }
+            }
+          }
+        },
+        "extensions": { "type": "object", "additionalProperties": true, "default": {} }
+      }
+    },
+    "derived": { "type": "object", "additionalProperties": true },
+    "advice": { "type": "array", "default": [], "items": { "type": "object", "additionalProperties": true } }
+  }
+}

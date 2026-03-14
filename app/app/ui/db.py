@@ -64,12 +64,15 @@ def _load_schema_current() -> str:
     except Exception:
         return "unknown"
 
-
 def _db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    db_path = Path(DB_PATH)
+
+    # Ensure directory exists
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
-
 
 def _db_has_ingest(conn: sqlite3.Connection) -> bool:
     try:

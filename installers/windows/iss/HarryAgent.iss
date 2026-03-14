@@ -84,8 +84,8 @@ begin
     case C of
       '"': Result := Result + '\"';
       '\': Result := Result + '\\';
-      #13: Result := Result + '\r';
-      #10: Result := Result + '\n';
+      Chr(13): Result := Result + '\r';
+      Chr(10): Result := Result + '\n';
     else
       Result := Result + C;
     end;
@@ -100,7 +100,7 @@ begin
   ConfigPath := ExpandConstant('{app}\agent_config.json');
   JsonText :=
     '{' + #13#10 +
-    '  "brain_base_url": "' + EscapeJson(BaseUrl) + '"' + #13#10 +
+    '  "brain_url": "' + EscapeJson(BaseUrl) + '"' + #13#10 +
     '}' + #13#10;
 
   Result := SaveStringToFile(ConfigPath, JsonText, False);
@@ -117,7 +117,7 @@ var
   OutFile: String;
   Script: String;
   ResultCode: Integer;
-  OutputText: String;
+  OutputText: AnsiString;
 begin
   PsFile := ExpandConstant('{tmp}\harry_test_brain.ps1');
   OutFile := ExpandConstant('{tmp}\harry_test_brain.txt');
@@ -154,7 +154,7 @@ begin
   end;
 
   if LoadStringFromFile(OutFile, OutputText) then
-    Msg := TrimEx(OutputText)
+    Msg := TrimEx(String(OutputText))
   else
     Msg := 'No response details captured.';
 
@@ -212,7 +212,7 @@ begin
   );
 
   BrainPage.Add('&Brain address:', False);
-  BrainPage.Values[0] := '192.168.7.174';
+  BrainPage.Values[0] := 'localhost';
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -250,7 +250,10 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
-    BrainUrl := NormalizeBrainUrl(BrainPage.Values[0]);
+    if WizardSilent then
+      BrainUrl := NormalizeBrainUrl('localhost')
+    else
+      BrainUrl := NormalizeBrainUrl(BrainPage.Values[0]);
 
     if not WriteAgentConfig(BrainUrl) then
     begin

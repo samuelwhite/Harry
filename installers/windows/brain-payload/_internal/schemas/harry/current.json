@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/harry/0.2.3",
+
+  "schema_version": "0.2.3",
+
+  "title": "HARRY Snapshot Schema",
+  "type": "object",
+  "additionalProperties": true,
+
+  "required": ["schema_version", "node", "ts", "facts", "metrics", "derived", "advice"],
+
+  "properties": {
+    "schema_version": { "type": "string" },
+
+    "agent_version": { "type": ["string", "null"] },
+    "brain_version": { "type": ["string", "null"] },
+    "schema_current": { "type": ["string", "null"] },
+
+    "agent_status": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "properties": {
+        "ok": { "type": ["boolean", "null"] },
+        "error_code": { "type": ["string", "null"] },
+        "error_summary": { "type": ["string", "null"] }
+      }
+    },
+
+    "node": { "type": "string" },
+    "ts": { "type": "string" },
+
+    "facts": { "type": "object", "additionalProperties": true },
+
+    "metrics": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "disk_used": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["mount"],
+            "properties": {
+              "mount": { "type": ["string", "null"] },
+              "used_pct": { "type": ["number", "null"] },
+              "pct": { "type": ["number", "null"] },
+              "fs": { "type": ["string", "null"] }
+            }
+          }
+        },
+
+        "temps_c": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": { "type": "number" }
+        },
+
+        "gpu": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["name"],
+            "properties": {
+              "name": { "type": ["string", "null"] },
+
+              "util_pct": { "type": ["number", "null"] },
+              "temp_c": { "type": ["number", "null"] },
+
+              "mem_total_mb": { "type": ["number", "null"] },
+              "mem_used_mb": { "type": ["number", "null"] },
+
+              "mem_used_pct": { "type": ["number", "null"] },
+              "vram_used_pct": { "type": ["number", "null"] },
+
+              "driver": { "type": ["string", "null"] },
+              "bus_id": { "type": ["string", "null"] }
+            }
+          }
+        },
+
+        "extensions": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        }
+      }
+    },
+
+    "derived": { "type": "object", "additionalProperties": true },
+
+    "advice": {
+      "type": "array",
+      "default": [],
+      "items": { "type": "object", "additionalProperties": true }
+    }
+  }
+}
