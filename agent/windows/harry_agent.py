@@ -24,7 +24,7 @@ def iso_now() -> str:
 
 def load_config() -> dict:
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
             return data if isinstance(data, dict) else {}
     except Exception:
@@ -35,7 +35,7 @@ config = load_config()
 BRAIN_URL = (
     config.get("brain_url")
     or os.environ.get("HARRY_BASE_URL")
-    or "http://127.0.0.1:8787"
+    or "http://harry-brain:8787"
 ).rstrip("/")
 ENDPOINT = f"{BRAIN_URL}/ingest"
 
@@ -190,7 +190,7 @@ $arr  = Get-CimInstance Win32_PhysicalMemoryArray | Select-Object MemoryDevices,
         info["ram_slots_total"] = slots_total
 
     # Try MaxCapacityEx first, then fall back to MaxCapacity.
-    # Some OEM systems omit or misreport these values, so only accept sane results.
+    # Many OEM systems report unrealistic maximums, so stay conservative.
     max_vals = []
     for arr in arrays:
         try:
@@ -198,7 +198,7 @@ $arr  = Get-CimInstance Win32_PhysicalMemoryArray | Select-Object MemoryDevices,
             if mcx:
                 # MaxCapacityEx is in bytes
                 gb = int(mcx) / (1024 ** 3)
-                if 1 <= gb <= 1024:
+                if 1 <= gb <= 128:
                     max_vals.append(int(round(gb)))
                     continue
         except Exception:
@@ -209,7 +209,7 @@ $arr  = Get-CimInstance Win32_PhysicalMemoryArray | Select-Object MemoryDevices,
             if mc:
                 # MaxCapacity is in KB
                 gb = int(mc) / 1024 / 1024
-                if 1 <= gb <= 1024:
+                if 1 <= gb <= 128:
                     max_vals.append(int(round(gb)))
         except Exception:
             pass

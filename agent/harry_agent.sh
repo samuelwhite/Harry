@@ -4,30 +4,10 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 # Harry Agent (self-updating, robust)
 # -----------------------------------------------------------------------------
-# Design goals:
-#   - produce a valid JSON snapshot
-#   - send it to the Brain
-#   - quietly self-update when a newer dist script is available
-#   - fail safely and log locally when something goes wrong
-#
-# Harry agents are intentionally conservative:
-#   - success runs are silent
-#   - failure runs are logged
-#   - broken update candidates are rejected before replacement
-#   - the last-known-good script is preserved where possible
-#
-# Env:
-#   HARRY_NODE              override node name (default: hostname)
-#   HARRY_INGEST_URL        full ingest URL (preferred)
-#   HARRY_URL               legacy ingest URL (fallback)
-#   HARRY_BASE_URL          base URL (optional; if set, used to derive ingest+dist)
-#   HARRY_SELF_UPDATE       1/0 (default: 1)
-#   HARRY_LOG_FILE          optional log file override
-# -----------------------------------------------------------------------------
 
-AGENT_VERSION="__HARRY_AGENT_VERSION__"
-SCHEMA_VERSION="__HARRY_SCHEMA_VERSION__"
-BRAIN_VERSION="__HARRY_BRAIN_VERSION__"
+AGENT_VERSION="0.2.3"
+SCHEMA_VERSION="0.2.3"
+BRAIN_VERSION="2026.03.08"
 
 CURL="${CURL:-/usr/bin/curl}"
 PYTHON="${PYTHON:-python3}"
@@ -54,6 +34,186 @@ log_fail() {
   printf '[%s] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$msg" >> "$LOG_FILE" 2>/dev/null || true
 }
 
+# -----------------------------------------------------------------------------
+# Local runtime status
+# -----------------------------------------------------------------------------
+STATUS_DIR="${HARRY_STATUS_DIR:-/var/lib/harry-agent}"
+STATUS_FILE="${HARRY_STATUS_FILE:-$STATUS_DIR/status.json}"
+
+if ! mkdir -p "$STATUS_DIR" >/dev/null 2>&1; then
+  STATUS_DIR="/tmp"
+  STATUS_FILE="${HARRY_STATUS_FILE:-$STATUS_DIR/status.json}"
+fi
+
+iso_now() {
+  date -u +'%Y-%m-%dT%H:%M:%SZ'
+}
+
+status_mark_start() {
+  [ "${PRINT_ONLY:-0}" = "1" ] && return 0
+  STATUS_FILE="$STATUS_FILE" "$PYTHON" - <<'PY'
+import json, os, tempfile
+from datetime import datetime, timezone
+
+path = os.environ["STATUS_FILE"]
+now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+data = {}
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+        if isinstance(raw, dict):
+            data = raw
+except Exception:
+    data = {}
+
+state = "bootstrapping" if not data.get("last_success_at") else "running"
+data["state"] = state
+data["stage"] = "collecting"
+data["last_run_at"] = now
+data.setdefault("consecutive_failures", 0)
+data["ok"] = True
+data.setdefault("error_code", None)
+data.setdefault("error_summary", None)
+
+fd, tmp = tempfile.mkstemp(
+    prefix="harry-agent-status-",
+    suffix=".json",
+    dir=(os.path.dirname(path) or "."),
+)
+os.close(fd)
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, separators=(",", ":"), ensure_ascii=False)
+os.replace(tmp, path)
+PY
+}
+
+status_mark_sending() {
+  [ "${PRINT_ONLY:-0}" = "1" ] && return 0
+  STATUS_FILE="$STATUS_FILE" "$PYTHON" - <<'PY'
+import json, os, tempfile
+from datetime import datetime, timezone
+
+path = os.environ["STATUS_FILE"]
+now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+data = {}
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+        if isinstance(raw, dict):
+            data = raw
+except Exception:
+    data = {}
+
+data["state"] = data.get("state") or "running"
+data["stage"] = "sending"
+data["last_run_at"] = data.get("last_run_at") or now
+data.setdefault("consecutive_failures", 0)
+data["ok"] = True
+data.setdefault("error_code", None)
+data.setdefault("error_summary", None)
+
+fd, tmp = tempfile.mkstemp(
+    prefix="harry-agent-status-",
+    suffix=".json",
+    dir=(os.path.dirname(path) or "."),
+)
+os.close(fd)
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, separators=(",", ":"), ensure_ascii=False)
+os.replace(tmp, path)
+PY
+}
+
+status_mark_success() {
+  [ "${PRINT_ONLY:-0}" = "1" ] && return 0
+  STATUS_FILE="$STATUS_FILE" "$PYTHON" - <<'PY'
+import json, os, tempfile
+from datetime import datetime, timezone
+
+path = os.environ["STATUS_FILE"]
+now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+data = {}
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+        if isinstance(raw, dict):
+            data = raw
+except Exception:
+    data = {}
+
+data["state"] = "healthy"
+data["stage"] = "complete"
+data["last_run_at"] = data.get("last_run_at") or now
+data["last_success_at"] = now
+data["last_error_at"] = None
+data["consecutive_failures"] = 0
+data["ok"] = True
+data["error_code"] = None
+data["error_summary"] = None
+
+fd, tmp = tempfile.mkstemp(
+    prefix="harry-agent-status-",
+    suffix=".json",
+    dir=(os.path.dirname(path) or "."),
+)
+os.close(fd)
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, separators=(",", ":"), ensure_ascii=False)
+os.replace(tmp, path)
+PY
+}
+
+status_mark_failure() {
+  [ "${PRINT_ONLY:-0}" = "1" ] && return 0
+
+  local err_code="${1:-agent_failed}"
+  local err_summary="${2:-unknown_error}"
+
+  STATUS_FILE="$STATUS_FILE" STATUS_ERR_CODE="$err_code" STATUS_ERR_SUMMARY="$err_summary" "$PYTHON" - <<'PY'
+import json, os, tempfile
+from datetime import datetime, timezone
+
+path = os.environ["STATUS_FILE"]
+err_code = os.environ.get("STATUS_ERR_CODE") or "agent_failed"
+err_summary = os.environ.get("STATUS_ERR_SUMMARY") or "unknown_error"
+now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+data = {}
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+        if isinstance(raw, dict):
+            data = raw
+except Exception:
+    data = {}
+
+fails = int(data.get("consecutive_failures") or 0) + 1
+state = "error" if fails >= 3 else "degraded"
+
+data["state"] = state
+data["stage"] = "failed"
+data["last_run_at"] = data.get("last_run_at") or now
+data["last_error_at"] = now
+data["consecutive_failures"] = fails
+data["ok"] = False
+data["error_code"] = err_code[:80]
+data["error_summary"] = err_summary[:240]
+
+fd, tmp = tempfile.mkstemp(
+    prefix="harry-agent-status-",
+    suffix=".json",
+    dir=(os.path.dirname(path) or "."),
+)
+os.close(fd)
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, separators=(",", ":"), ensure_ascii=False)
+os.replace(tmp, path)
+PY
+}
+
 if ! command -v "$CURL" >/dev/null 2>&1; then
   log_fail "dependency_missing node=${HARRY_NODE} command=curl"
   echo "curl not found; cannot run agent. Install curl and retry." >&2
@@ -64,8 +224,6 @@ HARRY_BASE_URL="${HARRY_BASE_URL:-}"
 HARRY_INGEST_URL="${HARRY_INGEST_URL:-}"
 HARRY_URL="${HARRY_URL:-}"
 
-# Derive Brain endpoints in a tolerant way so the agent can be configured with
-# either a full ingest URL or a base URL.
 if [ -n "$HARRY_BASE_URL" ]; then
   HARRY_BASE_URL="${HARRY_BASE_URL%/}"
   HARRY_INGEST_URL="${HARRY_INGEST_URL:-$HARRY_BASE_URL/ingest}"
@@ -106,7 +264,7 @@ PY
 }
 
 # -----------------------------------------------------------------------------
-# Self-update (validate-before-replace + last-known-good)
+# Self-update
 # -----------------------------------------------------------------------------
 self_update() {
   if [ "$SELF_UPDATE" = "0" ] || [ "$NO_UPDATE" = "1" ] || [ "${HARRY_SKIP_SELF_UPDATE:-0}" = "1" ]; then
@@ -244,12 +402,15 @@ fi
 # -----------------------------------------------------------------------------
 # Build payload in Python
 # -----------------------------------------------------------------------------
+status_mark_start
+
 TMP_PAYLOAD="$(mktemp /tmp/harry_agent_payload.XXXXXX.json)"
 TMP_ERR="$(mktemp /tmp/harry_agent_err.XXXXXX.log)"
 
 export HARRY_AGENT_VERSION="$AGENT_VERSION"
 export HARRY_SCHEMA_VERSION="$SCHEMA_VERSION"
 export HARRY_BRAIN_VERSION="$BRAIN_VERSION"
+export HARRY_STATUS_FILE="$STATUS_FILE"
 
 set +e
 "$PYTHON" - <<'PY' >"$TMP_PAYLOAD" 2>"$TMP_ERR"
@@ -259,6 +420,7 @@ from datetime import datetime, timezone
 AGENT_VERSION = os.environ.get("HARRY_AGENT_VERSION") or "unknown"
 SCHEMA_VERSION = os.environ.get("HARRY_SCHEMA_VERSION") or "unknown"
 BRAIN_VERSION = os.environ.get("HARRY_BRAIN_VERSION") or "unknown"
+STATUS_FILE = os.environ.get("HARRY_STATUS_FILE") or "/var/lib/harry-agent/status.json"
 
 def which(x): return shutil.which(x)
 
@@ -306,6 +468,23 @@ def parse_capacity_to_gb(s: str):
     if u == "GB": return n
     if u == "TB": return n * 1024
     return None
+
+def read_agent_status():
+    try:
+        with open(STATUS_FILE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {
+        "state": "bootstrapping",
+        "stage": "starting",
+        "ok": True,
+        "error_code": None,
+        "error_summary": None,
+        "consecutive_failures": 0,
+    }
 
 hostname = run(["hostname"]) or socket.gethostname() or "unknown"
 node = (os.environ.get("HARRY_NODE") or "").strip() or hostname
@@ -579,16 +758,18 @@ if which("nvidia-smi"):
             "mem_used_mb": to_int(mem_u),
         })
 
+agent_status = read_agent_status()
+agent_status.setdefault("ok", True)
+agent_status.setdefault("error_code", None)
+agent_status.setdefault("error_summary", None)
+agent_status.setdefault("consecutive_failures", 0)
+
 payload = {
   "schema_version": SCHEMA_VERSION,
   "agent_version": AGENT_VERSION,
   "node": node,
   "ts": ts,
-  "agent_status": {
-    "ok": True,
-    "error_code": None,
-    "error_summary": None
-  },
+  "agent_status": agent_status,
   "facts": {
     "hostname": hostname,
     "model": model,
@@ -629,6 +810,7 @@ set -e
 
 if [ "$PY_EXIT" -ne 0 ]; then
   log_fail "payload_generation_failed node=${HARRY_NODE} python_exit=${PY_EXIT}"
+  status_mark_failure "payload_generation_failed" "python_exit_${PY_EXIT}"
   echo "❌ Payload generation failed:" >&2
   sed -n '1,120p' "$TMP_ERR" >&2 || true
   rm -f "$TMP_PAYLOAD" "$TMP_ERR" >/dev/null 2>&1 || true
@@ -637,12 +819,14 @@ fi
 
 if [ ! -s "$TMP_PAYLOAD" ]; then
   log_fail "payload_generation_failed node=${HARRY_NODE} reason=empty_output"
+  status_mark_failure "payload_generation_failed" "empty_output"
   rm -f "$TMP_PAYLOAD" "$TMP_ERR" >/dev/null 2>&1 || true
   exit 1
 fi
 
 if ! json_is_valid_file "$TMP_PAYLOAD"; then
   log_fail "payload_generation_failed node=${HARRY_NODE} reason=invalid_json_output"
+  status_mark_failure "payload_generation_failed" "invalid_json_output"
   rm -f "$TMP_PAYLOAD" "$TMP_ERR" >/dev/null 2>&1 || true
   exit 1
 fi
@@ -656,6 +840,8 @@ fi
 # -----------------------------------------------------------------------------
 # Send to Brain
 # -----------------------------------------------------------------------------
+status_mark_sending
+
 TMP_RESP="$(mktemp /tmp/harry_agent_resp.XXXXXX.json)"
 
 set +e
@@ -671,6 +857,7 @@ set -e
 if [ "$CURL_EXIT" -ne 0 ]; then
   resp="$(cat "$TMP_RESP" 2>/dev/null || true)"
   log_fail "ingest_failed node=${HARRY_NODE} reason=curl_exit_${CURL_EXIT} url=${HARRY_INGEST_URL} resp=${resp}"
+  status_mark_failure "ingest_failed" "curl_exit_${CURL_EXIT}"
   rm -f "$TMP_PAYLOAD" "$TMP_ERR" "$TMP_RESP" >/dev/null 2>&1 || true
   exit 0
 fi
@@ -678,9 +865,11 @@ fi
 if [ "$HTTP_CODE" != "200" ]; then
   resp="$(cat "$TMP_RESP" 2>/dev/null || true)"
   log_fail "ingest_failed node=${HARRY_NODE} reason=http_${HTTP_CODE} url=${HARRY_INGEST_URL} resp=${resp}"
+  status_mark_failure "ingest_failed" "http_${HTTP_CODE}"
   rm -f "$TMP_PAYLOAD" "$TMP_ERR" "$TMP_RESP" >/dev/null 2>&1 || true
   exit 0
 fi
 
+status_mark_success
 rm -f "$TMP_PAYLOAD" "$TMP_ERR" "$TMP_RESP" >/dev/null 2>&1 || true
 exit 0

@@ -42,9 +42,6 @@ def _safe_get(d: Dict[str, Any], *path, default=None):
 
 
 def _ver_tuple(v: str) -> Tuple[int, int, int]:
-    """
-    Parse "0.2.2" -> (0,2,2). Anything weird -> (0,0,0)
-    """
     try:
         parts = (v or "").strip().split(".")
         parts = (parts + ["0", "0", "0"])[:3]
@@ -58,10 +55,6 @@ def _iso_utc_now() -> str:
 
 
 def normalise_harry_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    UI-friendly shape (tolerant). This is NOT the strict schema normaliser.
-    (Kept as-is; useful for UI adapters and debugging.)
-    """
     node = payload.get("node")
     ts = payload.get("ts")
 
@@ -106,7 +99,6 @@ def normalise_harry_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     storage_used_pct = _clamp(storage_used_pct)
 
-    # GPUs (tolerant)
     gpus_in = _safe_get(metrics, "gpus", default=None)
     if not isinstance(gpus_in, list):
         gpus_in = _safe_get(metrics, "gpu", default=None)
@@ -131,7 +123,6 @@ def normalise_harry_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
             mem_used_pct = _clamp(mem_used_pct)
             util_pct = _clamp(util_pct)
 
-            # derive vram% if we only have MB
             if mem_used_pct is None:
                 mt = _num(g.get("mem_total_mb"))
                 mu = _num(g.get("mem_used_mb"))
@@ -150,6 +141,7 @@ def normalise_harry_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "node": node,
         "ts": ts,
+        "agent_status": payload.get("agent_status") if isinstance(payload.get("agent_status"), dict) else {},
         "facts": {
             "model": facts.get("model"),
             "cpu": facts.get("cpu"),
@@ -171,26 +163,6 @@ def normalise_harry_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unknown") -> Dict[str, Any]:
-    """
-    Convert agent payload into a STRICT schema-compatible payload for the selected contract version.
-
-    0.2.1 behaviour (legacy strict):
-      - metrics.gpu[]: keep ONLY {name, util_pct, temp_c}
-      - metrics.temps_c: stash raw temps into metrics.extensions.temps_c_raw and set temps_c={}
-      - metrics.disk_used[]: keep ONLY {mount, used_pct}
-    0.2.2 behaviour (recommended):
-      - metrics.gpu[]: allow richer keys (vram MB/% + driver + bus_id)
-      - metrics.temps_c: allow dict[str] -> number (drop non-numeric values)
-      - metrics.disk_used[]: allow optional fs; used_pct must be numeric
-    Always:
-      - ensure derived + advice exist
-      - ensure schema_version, agent_version, node, ts exist
-      - stash raw/richer bits under extensions where useful
-    """
-
-    # If someone calls this without passing a known contract version,
-    # default to the current supported behaviour.
-    # (Main ingest path passes SCHEMA_CURRENT, but this prevents accidental legacy mode elsewhere.)
     if not contract_version or str(contract_version).strip().lower() == "unknown":
         contract_version = "0.2.3"
 
@@ -207,11 +179,11 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
     node = (payload.get("node") or _safe_dict(payload.get("facts")).get("hostname") or "unknown")
     ts = payload.get("ts") or _iso_utc_now()
     agent_version = str(payload.get("agent_version") or "unknown")
+    agent_status = payload.get("agent_status") if isinstance(payload.get("agent_status"), dict) else {}
 
     facts_in = _safe_dict(payload.get("facts"))
     metrics_in = _safe_dict(payload.get("metrics"))
 
-    # ---- facts
     facts_ext = _safe_dict(facts_in.get("extensions"))
     if facts_in.get("bios_version") is not None and facts_ext.get("bios_version") is None:
         facts_ext["bios_version"] = facts_in.get("bios_version")
@@ -249,10 +221,8 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
         "extensions": facts_ext,
     }
 
-    # ---- metrics extensions
     metrics_ext = _safe_dict(metrics_in.get("extensions"))
 
-    # ---- disk_used
     disk_used_in = _safe_list(metrics_in.get("disk_used"))
     disk_used_out: List[Dict[str, Any]] = []
     mounts_raw: List[Dict[str, Any]] = []
@@ -284,7 +254,6 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
     if mounts_raw:
         metrics_ext["mounts_raw"] = mounts_raw
 
-    # ---- temps_c
     temps_out: Dict[str, Any] = {}
     temps_in = metrics_in.get("temps_c")
 
@@ -293,7 +262,6 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
             metrics_ext["temps_c_raw"] = temps_in
         temps_out = {}
     else:
-        # 0.2.2+: keep dict[str] -> number, drop non-numeric values
         if isinstance(temps_in, dict):
             cleaned: Dict[str, float] = {}
             for k, val in temps_in.items():
@@ -305,7 +273,6 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
             if temps_in and temps_out != temps_in:
                 metrics_ext["temps_c_raw"] = temps_in
 
-    # ---- gpu
     gpu_in = metrics_in.get("gpu")
     if not isinstance(gpu_in, list):
         gpu_in = []
@@ -330,12 +297,10 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
                 item["temp_c"] = temp_c
             gpu_out.append(item)
         else:
-            # 0.2.2+: allow richer keys
             mem_total_mb = _num(g.get("mem_total_mb"))
             mem_used_mb = _num(g.get("mem_used_mb"))
             mem_used_pct = _clamp(_num(g.get("mem_used_pct")))
 
-            # derive mem_used_pct if only MB provided
             if mem_used_pct is None and mem_total_mb and mem_total_mb > 0 and mem_used_mb is not None:
                 mem_used_pct = _clamp((mem_used_mb / mem_total_mb) * 100.0)
 
@@ -369,7 +334,6 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
         "extensions": metrics_ext,
     }
 
-    # ---- derived/advice REQUIRED
     derived_in = payload.get("derived")
     if not isinstance(derived_in, dict):
         derived_in = {"health": {"state": "unknown", "worst_severity": "unknown", "reasons": []}, "extensions": {}}
@@ -381,6 +345,7 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
     return {
         "schema_version": str(contract_version),
         "agent_version": agent_version,
+        "agent_status": agent_status,
         "node": node,
         "ts": ts,
         "facts": facts_out,

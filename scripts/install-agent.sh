@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Harry Agent installer (node-side)
-# Usage:
-#   export HARRY_BASE_URL="http://<brain-host>:8787"
-#   curl -fsSL "$HARRY_BASE_URL/scripts/install-agent.sh" | sudo -E bash
-
 : "${HARRY_BASE_URL:?Set HARRY_BASE_URL, e.g. http://192.168.1.10:8787}"
 
 AGENT_DIR="${HARRY_AGENT_DIR:-/opt/harry/agent}"
 AGENT_PATH="${AGENT_DIR}/harry_agent.sh"
 TMP_AGENT="$(mktemp /tmp/harry_agent_install.XXXXXX.sh)"
+ALLOW_REPOINT="${HARRY_ALLOW_REPOINT:-0}"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1
@@ -81,8 +77,6 @@ install_optional_enrichers() {
   elif need_cmd zypper; then
     pkgs=(dmidecode util-linux sensors)
   elif need_cmd apk; then
-    # Alpine package names differ and some tools may not behave the same way.
-    # Install what is commonly available.
     pkgs=(util-linux lm-sensors)
   else
     pkgs=()
@@ -92,6 +86,17 @@ install_optional_enrichers() {
     echo "==> Installing optional hardware enrichment packages..."
     install_packages "${pkgs[@]}" || true
   fi
+}
+
+current_configured_base_url() {
+  local service_file="/etc/systemd/system/harry-agent.service"
+  if [ -f "$service_file" ]; then
+    awk -F= '/Environment="HARRY_BASE_URL=/{print $2}' "$service_file" \
+      | sed 's/"$//' \
+      | head -n1
+    return 0
+  fi
+  echo ""
 }
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -106,6 +111,22 @@ fi
 
 ensure_required_runtime
 install_optional_enrichers
+
+EXISTING_BASE_URL="$(current_configured_base_url || true)"
+if [ -n "${EXISTING_BASE_URL:-}" ] && [ "${EXISTING_BASE_URL%/}" != "${HARRY_BASE_URL%/}" ]; then
+  if [ "$ALLOW_REPOINT" != "1" ]; then
+    echo "ERROR: Existing Harry agent is already configured for a different Brain." >&2
+    echo "Existing: ${EXISTING_BASE_URL}" >&2
+    echo "Requested: ${HARRY_BASE_URL}" >&2
+    echo "Refusing to silently repoint this node." >&2
+    echo "To override intentionally, rerun with:" >&2
+    echo "  HARRY_ALLOW_REPOINT=1" >&2
+    exit 1
+  fi
+  echo "WARNING: Repoint override accepted." >&2
+  echo "         Existing: ${EXISTING_BASE_URL}" >&2
+  echo "         New:      ${HARRY_BASE_URL}" >&2
+fi
 
 mkdir -p "$AGENT_DIR"
 

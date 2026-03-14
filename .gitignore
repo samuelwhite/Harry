@@ -18,6 +18,7 @@ Thumbs.db
 
 # Logs / runtime
 *.log
+*.lkg
 
 # Local data (never commit)
 *.db

@@ -39,13 +39,8 @@ class Metrics(BaseModel):
     cpu_load_1m: Optional[float] = None
     mem_used_pct: Optional[float] = None
     disk_used: List[DiskUsed] = Field(default_factory=list)
-
-    # 0.2.2: allow arbitrary sensor labels -> numeric temps
     temps_c: Dict[str, Any] = Field(default_factory=dict)
-
-    # 0.2.2: allow richer GPU objects (name/util/temp/vram/driver/bus_id)
     gpu: List[Dict[str, Any]] = Field(default_factory=list)
-
     extensions: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -57,8 +52,10 @@ class Derived(BaseModel):
 
 
 class HarrySnapshot(BaseModel):
-    model_config = ConfigDict(extra="allow")  # keep forward-compatible
+    model_config = ConfigDict(extra="allow")
     schema_version: str
+    agent_version: Optional[str] = None
+    agent_status: Dict[str, Any] = Field(default_factory=dict)
     node: str
     ts: str
     facts: Facts = Field(default_factory=Facts)

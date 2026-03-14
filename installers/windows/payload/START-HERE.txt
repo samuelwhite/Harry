@@ -1,0 +1,88 @@
+HARRY WINDOWS AGENT — START HERE
+
+This package installs the Harry hardware monitoring agent on Windows.
+
+IMPORTANT
+Do NOT run the .exe files directly.
+Always install using the PowerShell installer.
+
+Installation
+
+1. Extract the ZIP file first.
+2. Right-click PowerShell and choose:
+
+   Run as Administrator
+
+3. Change into this folder.
+
+4. Run the installer:
+
+   .\install_agent.ps1
+
+5. When prompted, enter the Harry Brain address.
+
+Example:
+http://192.168.1.20:8787
+
+
+What the installer does
+
+The installer will:
+
+• Create the install folder:
+  C:\ProgramData\Harry
+
+• Copy the agent files
+
+• Create agent_config.json
+
+• Install the Windows service
+
+• Start the service automatically
+
+
+Where Harry is installed
+
+C:\ProgramData\Harry
+
+
+Important files
+
+Agent runtime
+C:\ProgramData\Harry\harry_agent.exe
+
+Configuration
+C:\ProgramData\Harry\agent_config.json
+
+
+Log files
+
+Wrapper log
+C:\ProgramData\Harry\HarryAgentService.wrapper.log
+
+Agent output
+C:\ProgramData\Harry\HarryAgentService.out.log
+
+Agent errors
+C:\ProgramData\Harry\HarryAgentService.err.log
+
+
+View logs live
+
+Open PowerShell and run:
+
+Get-Content "C:\ProgramData\Harry\HarryAgentService.out.log" -Wait
+
+
+Uninstalling
+
+Run:
+
+.\uninstall_agent.ps1
+
+
+About Harry
+
+Harry (HARdware Review buddY) provides hardware awareness for small infrastructure environments.
+
+It reports system hardware and health metrics to the Harry Brain server.
