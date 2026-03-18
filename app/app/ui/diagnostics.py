@@ -1,8 +1,58 @@
 from __future__ import annotations
 
-from app.versions import AGENT_VERSION
-from app.ui.fleet import build_nodeviews, render_diagnostics_panel
-from app.ui.templates import page_html
+from typing import Any, Dict, List
+
+from app.versions import AGENT_VERSION, BRAIN_VERSION
+from app.ui.db import _load_schema_current
+from app.ui.fleet import build_nodeviews, _render_advice_queue
+from app.ui.templates import _html_escape, render_shell
+
+
+def _diagnostics_sidebar(hours: int, debug: bool) -> List[Dict[str, Any]]:
+    debug_q = "&debug=1" if debug else ""
+    return [
+        {
+            "label": "Fleet",
+            "items": [
+                {"label": "Overview", "href": f"/?hours={hours}{debug_q}", "sub": True},
+                {"label": "Nodes", "href": f"/?hours={hours}{debug_q}#fleet-table", "sub": True},
+                {"label": "Trends", "href": f"/?hours={hours}{debug_q}#fleet-trends", "sub": True},
+                {"label": "Hidden Nodes", "href": f"/?hours={hours}{debug_q}#hidden-nodes", "sub": True},
+            ],
+        },
+        {
+            "label": "Inventory",
+            "items": [
+                {"label": "Summary", "href": f"/inventory?hours={hours}{debug_q}", "sub": True},
+                {"label": "Comparison Table", "href": f"/inventory?hours={hours}{debug_q}#comparison-table", "sub": True},
+                {"label": "Details", "href": f"/inventory?hours={hours}{debug_q}#node-details", "sub": True},
+            ],
+        },
+        {
+            "label": "Diagnostics",
+            "items": [
+                {"label": "Summary", "href": f"/diagnostics?hours={hours}{debug_q}", "sub": True},
+                {"label": "Recommendations", "href": "#recommendations", "sub": True},
+                {"label": "Statistics", "href": "#statistics", "sub": True},
+            ],
+        },
+	{
+	    "label": "Downloads",
+	    "items": [
+	        {"label": "Agent Installers", "href": "/downloads#downloads-overview", "page": "downloads", "sub": True},
+	        {"label": "Available Downloads", "href": "/downloads#downloads-files", "page": "downloads", "sub": True},
+	        {"label": "Add a Node", "href": "/downloads#downloads-instructions", "page": "downloads", "sub": True},
+	    ],
+	},
+    ]
+
+
+def _diagnostics_actions(hours: int, debug: bool) -> List[Dict[str, str]]:
+    debug_target = "0" if debug else "1"
+    return [
+        {"label": "Dump JSON", "href": f"/dump?hours={hours}"},
+        {"label": "Debug toggle", "href": f"/diagnostics?hours={hours}&debug={debug_target}"},
+    ]
 
 
 def render_diagnostics_page(hours: int, debug: bool) -> str:
@@ -32,13 +82,25 @@ def render_diagnostics_page(hours: int, debug: bool) -> str:
 
     advice_total = sum(len(n.advice or []) for n in nodeviews)
 
-    body = render_diagnostics_panel(hours=hours, debug=debug)
+    schema_current = _load_schema_current()
+    sidebar_footer = (
+        f"<strong>Brain</strong> {_html_escape(BRAIN_VERSION)}<br/>"
+        f"<strong>Agent</strong> {_html_escape(AGENT_VERSION)}<br/>"
+        f"<strong>Schema</strong> {_html_escape(schema_current)}"
+    )
 
-    body += f"""
-<div class="section">
+    page_subtitle = (
+        f"<span>{stale_n} stale</span>"
+        f"<span>·</span><span>{bad_n} bad</span>"
+        f"<span>·</span><span>{warn_n} warn</span>"
+        f"<span>·</span><span>{info_n} info</span>"
+    )
+
+    content = f"""
+<div class="section" id="diagnostic-summary">
   <div class="sectionhead">
     <div>
-      <div class="h2">Diagnostic Summary</div>
+      <div class="h2">Summary</div>
       <div class="h2sub">Operational counts across the fleet.</div>
     </div>
   </div>
@@ -63,10 +125,24 @@ def render_diagnostics_page(hours: int, debug: bool) -> str:
   </div>
 </div>
 
-<div class="section">
+<div class="divider"></div>
+
+<div class="section" id="recommendations">
   <div class="sectionhead">
     <div>
-      <div class="h2">Quick checks</div>
+      <div class="h2">Recommendations</div>
+      <div class="h2sub">Multiple findings, ordered by severity.</div>
+    </div>
+  </div>
+  {_render_advice_queue(nodeviews)}
+</div>
+
+<div class="divider"></div>
+
+<div class="section" id="statistics">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">Statistics</div>
       <div class="h2sub">Simple operational counts.</div>
     </div>
   </div>
@@ -90,4 +166,13 @@ def render_diagnostics_page(hours: int, debug: bool) -> str:
 </div>
 """
 
-    return page_html("HARRY — Diagnostics", body)
+    return render_shell(
+        title="HARRY — Diagnostics",
+        active_page="diagnostics",
+        page_title="Diagnostics",
+        page_subtitle=page_subtitle,
+        sidebar_sections=_diagnostics_sidebar(hours=hours, debug=debug),
+        actions=_diagnostics_actions(hours=hours, debug=debug),
+        content=content,
+        sidebar_footer=sidebar_footer,
+    )

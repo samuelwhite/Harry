@@ -1,5 +1,5 @@
 #define MyAppName "Harry Agent"
-#define MyAppVersion "0.2.3"
+#define MyAppVersion "2026.03.18"
 #define MyAppPublisher "Samuel White"
 
 [Setup]
@@ -24,8 +24,6 @@ UninstallDisplayIcon={app}\HarryAgentService.exe
 Source: "..\payload\harry_agent.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\payload\HarryAgentService.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\payload\HarryAgentService.xml"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\payload\README.txt"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\payload\START-HERE.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
 Name: "{app}"

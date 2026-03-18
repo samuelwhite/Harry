@@ -7,6 +7,7 @@
 
   <env name="HARRY_DB_PATH" value="C:\ProgramData\Harry\brain\data\harry.db"/>
   <env name="HARRY_PORT" value="8787"/>
+  <env name="HARRY_PUBLIC_BASE_URL" value="__HARRY_PUBLIC_BASE_URL__"/>
 
   <log mode="roll"/>
 </service>

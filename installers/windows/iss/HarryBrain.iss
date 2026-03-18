@@ -1,6 +1,6 @@
 [Setup]
 AppName=Harry Brain
-AppVersion=0.3.1
+AppVersion=2026.03.18
 DefaultDirName={pf}\Harry\brain
 DefaultGroupName=Harry
 OutputBaseFilename=HarryBrainSetup
@@ -15,16 +15,19 @@ Name: "C:\ProgramData\Harry\brain\logs"
 
 [Files]
 Source: "..\brain-payload\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\output\harry-agent-setup-0.3.1.exe"; DestDir: "{tmp}"; Flags: ignoreversion
+Source: "..\..\..\downloads\*"; DestDir: "{app}\downloads"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\..\downloads\HarryAgentSetup.exe"; DestDir: "{tmp}"; Flags: ignoreversion
 
 [Run]
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\set_brain_public_url.ps1"""; Flags: runhidden waituntilterminated
 Filename: "{app}\HarryBrainService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated
 Filename: "{app}\HarryBrainService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""try { if (-not (Get-NetFirewallRule -DisplayName 'Harry Brain TCP 8787' -ErrorAction SilentlyContinue)) { New-NetFirewallRule -DisplayName 'Harry Brain TCP 8787' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8787 -Profile Private,Domain | Out-Null } } catch { exit 0 }"""; Flags: runhidden waituntilterminated
-Filename: "{tmp}\harry-agent-setup-0.3.1.exe"; Parameters: "/VERYSILENT"; Flags: waituntilterminated
-Filename: "http://localhost:8787/"; Flags: shellexec postinstall skipifsilent
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""try {{ if (-not (Get-NetFirewallRule -DisplayName 'Harry Brain TCP 8787' -ErrorAction SilentlyContinue)) {{ New-NetFirewallRule -DisplayName 'Harry Brain TCP 8787' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8787 -Profile Private,Domain | Out-Null }} }} catch {{ exit 0 }}"""; Flags: runhidden waituntilterminated
+Filename: "{tmp}\HarryAgentSetup.exe"; Parameters: "/VERYSILENT"; Flags: waituntilterminated
+Filename: "timeout.exe"; Parameters: "/T 3"; Flags: runhidden waituntilterminated
+Filename: "http://127.0.0.1:8787/"; Flags: shellexec postinstall skipifsilent
 
 [UninstallRun]
 Filename: "{app}\HarryBrainService.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist
 Filename: "{app}\HarryBrainService.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""try { Remove-NetFirewallRule -DisplayName 'Harry Brain TCP 8787' -ErrorAction SilentlyContinue } catch { exit 0 }"""; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Remove-NetFirewallRule -DisplayName 'Harry Brain TCP 8787' -ErrorAction SilentlyContinue"""; Flags: runhidden waituntilterminated

@@ -4,8 +4,11 @@ services:
     environment:
       - HARRY_DB_PATH=/data/harry.db
       - HARRY_DATA_DIR=/data
+      - HARRY_PUBLIC_BASE_URL=http://192.168.7.174:8789
+      - HARRY_DOWNLOADS_DIR=/workspace/downloads
     volumes:
       - harry_data:/data
+      - .:/workspace
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health').read()\""]
       interval: 10s

@@ -2,15 +2,65 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
+from app.versions import AGENT_VERSION, BRAIN_VERSION
+
 from .db import (
     _db,
     _db_has_ingest,
     _fetch_latest_per_node,
     _get_facts,
     _get_metrics,
+    _load_schema_current,
     _raw_payload,
 )
-from .templates import page_html, top_nav
+from .templates import _html_escape, render_shell
+
+
+def _inventory_sidebar(hours: int, debug: bool) -> List[Dict[str, Any]]:
+    debug_q = "&debug=1" if debug else ""
+    return [
+        {
+            "label": "Fleet",
+            "items": [
+                {"label": "Overview", "href": f"/?hours={hours}{debug_q}", "sub": True},
+                {"label": "Nodes", "href": f"/?hours={hours}{debug_q}#fleet-table", "sub": True},
+                {"label": "Trends", "href": f"/?hours={hours}{debug_q}#fleet-trends", "sub": True},
+                {"label": "Hidden Nodes", "href": f"/?hours={hours}{debug_q}#hidden-nodes", "sub": True},
+            ],
+        },
+        {
+            "label": "Inventory",
+            "items": [
+                {"label": "Summary", "href": f"/inventory?hours={hours}{debug_q}", "sub": True},
+                {"label": "Comparison Table", "href": "#comparison-table", "sub": True},
+                {"label": "Details", "href": "#node-details", "sub": True},
+            ],
+        },
+        {
+            "label": "Diagnostics",
+            "items": [
+                {"label": "Summary", "href": f"/diagnostics?hours={hours}{debug_q}", "sub": True},
+                {"label": "Recommendations", "href": f"/diagnostics?hours={hours}{debug_q}#recommendations", "sub": True},
+                {"label": "Statistics", "href": f"/diagnostics?hours={hours}{debug_q}#statistics", "sub": True},
+            ],
+        },
+	{
+	    "label": "Downloads",
+	    "items": [
+	        {"label": "Agent Installers", "href": "/downloads#downloads-overview", "page": "downloads", "sub": True},
+	        {"label": "Available Downloads", "href": "/downloads#downloads-files", "page": "downloads", "sub": True},
+	        {"label": "Add a Node", "href": "/downloads#downloads-instructions", "page": "downloads", "sub": True},
+	    ],
+	},
+    ]
+
+
+def _inventory_actions(hours: int, debug: bool) -> List[Dict[str, str]]:
+    return [
+        {"label": "Inventory JSON", "href": f"/inventory.json?hours={hours}"},
+        {"label": "Inventory Markdown", "href": f"/inventory?hours={hours}&format=md"},
+    ]
+
 
 def _bios_display(facts: Dict[str, Any], raw_facts: Dict[str, Any]) -> str:
     for src in (facts, raw_facts):
@@ -249,7 +299,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
         table_rows.append(
             f"""
 <tr>
-  <td><a href="/node/{node}">{node}</a></td>
+  <td><a href="/node/{node}?hours={hours}">{node}</a></td>
   <td>{model}</td>
   <td>{cpu}</td>
   <td>{ram}</td>
@@ -265,7 +315,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
 <div class="card">
   <div class="sectionhead">
     <div>
-      <div class="h2"><a href="/node/{node}">{node}</a></div>
+      <div class="h2"><a href="/node/{node}?hours={hours}">{node}</a></div>
       <div class="h2sub">{model}</div>
     </div>
     <div class="pill">{last_seen}</div>
@@ -294,23 +344,21 @@ def render_inventory_page(hours: int, debug: bool) -> str:
 """
         )
 
-    body = f"""
-<div class="h1">HARRY — Inventory</div>
-<div class="sub">
-  <span>Hardware comparison view</span>
-</div>
+    schema_current = _load_schema_current()
+    sidebar_footer = (
+        f"<strong>Brain</strong> {_html_escape(BRAIN_VERSION)}<br/>"
+        f"<strong>Agent</strong> {_html_escape(AGENT_VERSION)}<br/>"
+        f"<strong>Schema</strong> {_html_escape(schema_current)}"
+    )
 
-{top_nav("inventory", hours, debug, node_count, 0)}
+    page_subtitle = "<span>Hardware comparison view</span>"
 
-<div class="section">
+    content = f"""
+<div class="section" id="inventory-overview">
   <div class="sectionhead">
     <div>
-      <div class="h2">Inventory Summary</div>
+      <div class="h2">Summary</div>
       <div class="h2sub">Hardware-aware comparison across the fleet.</div>
-    </div>
-    <div class="actions">
-      <a class="btn" href="/inventory.json?hours={hours}">JSON</a>
-      <a class="btn" href="/inventory?hours={hours}&format=md">Markdown</a>
     </div>
   </div>
 
@@ -334,7 +382,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
   </div>
 </div>
 
-<div class="section">
+<div class="section" id="comparison-table">
   <div class="sectionhead">
     <div>
       <div class="h2">Comparison Table</div>
@@ -362,10 +410,10 @@ def render_inventory_page(hours: int, debug: bool) -> str:
   </div>
 </div>
 
-<div class="section">
+<div class="section" id="node-details">
   <div class="sectionhead">
     <div>
-      <div class="h2">Node Detail</div>
+      <div class="h2">Details</div>
       <div class="h2sub">Per-node hardware cards.</div>
     </div>
   </div>
@@ -375,5 +423,14 @@ def render_inventory_page(hours: int, debug: bool) -> str:
   </div>
 </div>
 """
-    return page_html("HARRY — Inventory", body)
 
+    return render_shell(
+        title="HARRY — Inventory",
+        active_page="inventory",
+        page_title="Inventory",
+        page_subtitle=page_subtitle,
+        sidebar_sections=_inventory_sidebar(hours=hours, debug=debug),
+        actions=_inventory_actions(hours=hours, debug=debug),
+        content=content,
+        sidebar_footer=sidebar_footer,
+    )

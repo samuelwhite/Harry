@@ -1,44 +1,85 @@
+# ----------------------------
 # Python
+# ----------------------------
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 *.egg-info/
-.dist-info/
+*.dist-info/
 .venv/
 venv/
-.env/
+.env
 .env.*
 
-# Installer builds
-installers/windows/output/
-installers/windows/build/
+# ----------------------------
+# Build artefacts (REMOVE THESE)
+# ----------------------------
+build/
+installers/windows/iss/Output/
+dist/brain_server/_internal/base_library.zip
+installers/windows/brain-payload/_internal/base_library.zip
+installers/*.zip
 
-# OS / editor
+# ----------------------------
+# Installer build dirs (keep output elsewhere)
+# ----------------------------
+installers/windows/build/
+downloads/*.exe
+installers/windows/iss/Output/*.exe
+
+installers/windows/brain-payload/*.exe
+installers/windows/brain-payload/_internal/dist/windows/*.exe
+installers/windows/brain-payload/brain_server.exe
+installers/windows/brain-payload/HarryBrainService.exe
+installers/windows/brain-payload/_internal/dist/windows/harry_agent.exe
+installers/windows/brain-payload/_internal/dist/windows/HarryAgentService.exe
+
+# ----------------------------
+# OS / editor junk
+# ----------------------------
 .DS_Store
 Thumbs.db
 *.swp
 *.swo
 
+# ----------------------------
 # Logs / runtime
+# ----------------------------
 *.log
 *.lkg
 
+# ----------------------------
 # Local data (never commit)
+# ----------------------------
 *.db
 data/
 backups/
 tmp/
 .cache/
+/dist/
 
-# Archives
-*.tar.gz
-*.zip
-
-# Secrets (belt & braces)
+# ----------------------------
+# Secrets
+# ----------------------------
 secrets.yml
 *.key
 *.pem
 
-# Local backups
-_private_backups/
+# ----------------------------
+# Local / accidental files
+# ----------------------------
+delete
+stop
+
+# ----------------------------
+# OPTIONAL (decide yourself)
+# ----------------------------
+# installers/windows/output/
+# (uncomment if you decide NOT to track it)
+
+# ----------------------------
+# IMPORTANT (DO NOT IGNORE)
+# ----------------------------
+# /app/dist/         <-- REQUIRED (agent updates)
+# downloads/    <-- REQUIRED (installer distribution)

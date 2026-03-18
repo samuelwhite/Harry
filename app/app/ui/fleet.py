@@ -26,7 +26,6 @@ from app.ui.db import (
     _clamp,
 )
 from app.ui.templates import (
-    JS_PULSE,
     _ago,
     _badge_text,
     _fmt_dt,
@@ -34,14 +33,85 @@ from app.ui.templates import (
     _pill,
     _safe_dom_id,
     _sev_dot,
-    page_html,
-    top_nav,
+    render_shell,
 )
 
 try:
     from app.advice_engine import build_advice_and_health as advice_build
 except Exception:
     advice_build = None
+
+
+SCREENSHOT_NAME_ALIASES = {
+    "DESKTOP-8QV3E94": "compute-node-1",
+    "Desktop-Sam": "gaming-pc-1",
+    "DESKTOP-SAM": "gaming-pc-1",
+    "alfred": "server-1",
+    "cortex": "ai-node-1",
+    "jarvis": "compute-node-2",
+    "lois-edge": "edge-node-1",
+    "pi-kiosk": "kiosk-1",
+    "pihole": "network-node-1",
+}
+
+
+def _screenshot_mode_enabled() -> bool:
+    return (os.environ.get("HARRY_SCREENSHOT_MODE") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _display_node_name(name: str) -> str:
+    clean = (name or "").strip()
+    if not _screenshot_mode_enabled():
+        return clean
+    return SCREENSHOT_NAME_ALIASES.get(clean, clean)
+
+
+def _fleet_sidebar(hours: int, debug: bool) -> List[Dict[str, Any]]:
+    debug_q = "&debug=1" if debug else ""
+    return [
+        {
+            "label": "Fleet",
+            "items": [
+                {"label": "Overview", "href": f"/?hours={hours}{debug_q}", "sub": True},
+                {"label": "Nodes", "href": "#fleet-table", "sub": True},
+                {"label": "Trends", "href": "#fleet-trends", "sub": True},
+                {"label": "Hidden Nodes", "href": "#hidden-nodes", "sub": True},
+            ],
+        },
+        {
+            "label": "Inventory",
+            "items": [
+                {"label": "Summary", "href": f"/inventory?hours={hours}{debug_q}", "sub": True},
+                {"label": "Comparison Table", "href": f"/inventory?hours={hours}{debug_q}#comparison-table", "sub": True},
+                {"label": "Details", "href": f"/inventory?hours={hours}{debug_q}#node-details", "sub": True},
+            ],
+        },
+        {
+            "label": "Diagnostics",
+            "items": [
+                {"label": "Summary", "href": f"/diagnostics?hours={hours}{debug_q}", "sub": True},
+                {"label": "Recommendations", "href": f"/diagnostics?hours={hours}{debug_q}#recommendations", "sub": True},
+                {"label": "Statistics", "href": f"/diagnostics?hours={hours}{debug_q}#statistics", "sub": True},
+            ],
+        },
+        {
+            "label": "Downloads",
+            "items": [
+                {"label": "Agent Installers", "href": "/downloads#downloads-overview", "page": "downloads", "sub": True},
+                {"label": "Available Downloads", "href": "/downloads#downloads-files", "page": "downloads", "sub": True},
+                {"label": "Add a Node", "href": "/downloads#downloads-instructions", "page": "downloads", "sub": True},
+            ],
+        },
+    ]
+
+
+def _global_actions(hours: int, debug: bool) -> List[Dict[str, str]]:
+    debug_target = "0" if debug else "1"
+    return [
+        {"label": "Dump JSON", "href": f"/dump?hours={hours}"},
+        {"label": "Inventory JSON", "href": f"/inventory.json?hours={hours}"},
+        {"label": "Debug toggle", "href": f"/?hours={hours}&debug={debug_target}"},
+    ]
 
 
 def _worst_severity(advice: List[Dict[str, Any]]) -> str:
@@ -730,7 +800,12 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
 
     advice = list(_advice_normalised_snapshot(payload))
     advice.extend(_cpu_pressure_advice(cpu_pressure_now, cpu_pressure_avg_72h, cpu_pressure_peak_72h))
-    advice.sort(key=lambda a: ({"bad": 0, "warn": 1, "info": 2, "ok": 3}.get(str(a.get("severity") or "ok").lower(), 9), str(a.get("message") or "").lower()))
+    advice.sort(
+        key=lambda a: (
+            {"bad": 0, "warn": 1, "info": 2, "ok": 3}.get(str(a.get("severity") or "ok").lower(), 9),
+            str(a.get("message") or "").lower(),
+        )
+    )
 
     delayed = health_state == "warning" and any("delayed" in str(r).lower() for r in (health.get("reasons") or []))
 
@@ -961,13 +1036,14 @@ def _render_storage_physical(disks: List[Dict[str, Any]]) -> str:
 def _render_top_banner(nodes: List[NodeView]) -> str:
     pills: List[str] = []
     for nv in nodes:
+        display_name = _display_node_name(nv.node)
         if nv.worst in ("bad", "warn", "stale"):
             if nv.worst == "stale":
-                msg = f"{nv.node} — Node has stopped reporting (last seen {_ago(nv.ts)})."
+                msg = f"{display_name} — Node has stopped reporting (last seen {_ago(nv.ts)})."
             elif nv.worst == "bad":
-                msg = f"{nv.node} — Needs attention."
+                msg = f"{display_name} — Needs attention."
             else:
-                msg = f"{nv.node} — Warning."
+                msg = f"{display_name} — Warning."
             pills.append(f"<span class='topwarn {nv.worst}'>{_html_escape(msg)}</span>")
     if not pills:
         pills.append("<span class='topwarn ok'>Nothing to report… yet.</span>")
@@ -983,15 +1059,15 @@ def _fleet_outlier_pills(nodeviews: List[NodeView]) -> str:
 
     busiest = max(active, key=lambda n: n.cpu_pressure_avg_72h if n.cpu_pressure_avg_72h is not None else -1.0)
     if busiest.cpu_pressure_avg_72h is not None:
-        pills.append(_pill("neutral", f"Busiest: {busiest.node} · Avg CPU {busiest.cpu_pressure_avg_72h:.0f}%"))
+        pills.append(_pill("neutral", f"Busiest: {_display_node_name(busiest.node)} · Avg CPU {busiest.cpu_pressure_avg_72h:.0f}%"))
 
     hottest = max(active, key=lambda n: n.temp_c if n.temp_c is not None else -999.0)
     if hottest.temp_c is not None:
-        pills.append(_pill("neutral", f"Hottest: {hottest.node} · {hottest.temp_c:.1f}°C"))
+        pills.append(_pill("neutral", f"Hottest: {_display_node_name(hottest.node)} · {hottest.temp_c:.1f}°C"))
 
     rammiest = max(active, key=lambda n: n.ram_used_pct if n.ram_used_pct is not None else -1.0)
     if rammiest.ram_used_pct is not None:
-        pills.append(_pill("neutral", f"Most RAM pressure: {rammiest.node} · {rammiest.ram_used_pct:.0f}%"))
+        pills.append(_pill("neutral", f"Most RAM pressure: {_display_node_name(rammiest.node)} · {rammiest.ram_used_pct:.0f}%"))
 
     return f"<div class='actions' style='margin:10px 0 2px 0; flex-wrap:wrap;'>{''.join(pills)}</div>" if pills else ""
 
@@ -1040,7 +1116,7 @@ def _render_fleet_map(nodeviews: List[NodeView], brain_name: str) -> str:
     start_y = 86
     step = 68
 
-    PULSE_RECENT_SECONDS = int(os.environ.get("HARRY_PULSE_RECENT_SECONDS", "90"))
+    pulse_recent_seconds = int(os.environ.get("HARRY_PULSE_RECENT_SECONDS", "90"))
 
     def dot_color(sev: str) -> str:
         sev = (sev or "ok").lower()
@@ -1080,7 +1156,7 @@ def _render_fleet_map(nodeviews: List[NodeView], brain_name: str) -> str:
     )
     svg.append(
         f'<text x="{bx+40}" y="{by+16}" text-anchor="middle" '
-        f'fill="rgba(255,255,255,0.70)" font-size="12">{_html_escape(brain_name)}</text>'
+        f'fill="rgba(255,255,255,0.70)" font-size="12">{_html_escape(_display_node_name(brain_name))}</text>'
     )
 
     now = _utcnow()
@@ -1095,7 +1171,7 @@ def _render_fleet_map(nodeviews: List[NodeView], brain_name: str) -> str:
         col = dot_color(nv.worst)
         svg.append(f'<circle id="dot-{sid}" class="nodeDot" cx="{nx-40}" cy="{y}" r="10" fill="{col}" filter="url(#g)"/>')
 
-        label = nv.node
+        label = _display_node_name(nv.node)
         meta = _ago(nv.ts)
 
         agent_state = _agent_version_state(nv.agent_version, AGENT_VERSION)
@@ -1126,35 +1202,37 @@ def _render_fleet_map(nodeviews: List[NodeView], brain_name: str) -> str:
         recent = False
         if nv.ts:
             try:
-                recent = (now - nv.ts).total_seconds() <= PULSE_RECENT_SECONDS
+                recent = (now - nv.ts).total_seconds() <= pulse_recent_seconds
             except Exception:
                 recent = False
 
         if recent:
             svg.append(
-                f'''
+                f"""
                 <circle r="4" fill="rgba(255,255,255,0.80)" filter="url(#pg)">
                   <animateMotion dur="1.4s" repeatCount="1" path="{path_d}" />
                   <animate attributeName="r" values="3;5;3" dur="1.4s" repeatCount="1" />
                   <animate attributeName="opacity" values="0.0;1.0;0.0" dur="1.4s" repeatCount="1" />
                 </circle>
-                '''
+                """
             )
 
     svg.append("</svg>")
     return "".join(svg)
+
 
 def _render_inventory_table(nodeviews: List[NodeView], hours: int) -> str:
     rows: List[str] = []
     next_url = f"/?hours={hours}"
 
     for nv in nodeviews:
+        display_name = _display_node_name(nv.node)
         dot = _sev_dot(nv.worst)
         model = nv.model or "—"
         cpu = nv.cpu or "—"
-        ram_lines = (nv.ram_total.splitlines() if nv.ram_total else [])
-        ram_main = (ram_lines[0] if len(ram_lines) >= 1 else "—")
-        ram_meta = (ram_lines[1] if len(ram_lines) >= 2 else "")
+        ram_lines = nv.ram_total.splitlines() if nv.ram_total else []
+        ram_main = ram_lines[0] if len(ram_lines) >= 1 else "—"
+        ram_meta = ram_lines[1] if len(ram_lines) >= 2 else ""
         bios = nv.bios or "—"
         last = f"{_fmt_dt(nv.ts)} ({_ago(nv.ts)})"
 
@@ -1170,14 +1248,14 @@ def _render_inventory_table(nodeviews: List[NodeView], hours: int) -> str:
             else:
                 adv = _badge_text("ok", "OK")
             ta = _top_action(nv)
-            hint = (ta[1] if ta else f"CPU {nv.cpu_pressure_band}")
+            hint = ta[1] if ta else f"CPU {nv.cpu_pressure_band}"
 
         hide_btn = _action_form(_node_action_url(nv.node, "hide", next_url), "Hide")
 
         rows.append(
             f"""
 <tr>
-  <td class="status"><span class="{dot}"></span> <a href="/node/{_html_escape(nv.node)}">{_html_escape(nv.node)}</a></td>
+  <td class="status"><span class="{dot}"></span> <a href="/node/{_html_escape(nv.node)}">{_html_escape(display_name)}</a></td>
   <td>{_html_escape(model)}</td>
   <td>{_html_escape(cpu)}</td>
   <td class="right mono">
@@ -1239,13 +1317,14 @@ def _render_advice_queue(nodeviews: List[NodeView]) -> str:
 
     rows: List[str] = []
     for _, _, node, label, msg, model in items[:40]:
+        display_name = _display_node_name(node)
         sev_cls = "stale" if label == "STALE" else label.lower()
         badge = _badge_text(sev_cls, label)
         rows.append(
             f"""
 <div class="advrow">
   <div class="advleft">
-    <div class="advnode"><a href="/node/{_html_escape(node)}">{_html_escape(node)}</a> <span class="advsmall">{_html_escape(model)}</span></div>
+    <div class="advnode"><a href="/node/{_html_escape(node)}">{_html_escape(display_name)}</a> <span class="advsmall">{_html_escape(model)}</span></div>
     <div class="advmsg">{_html_escape(msg)}</div>
   </div>
   <div class="advright">
@@ -1309,6 +1388,7 @@ def _render_fleet_trends(nodeviews: List[NodeView], hours: int) -> str:
     cards: List[str] = []
 
     for nv in nodeviews:
+        display_name = _display_node_name(nv.node)
         pills: List[str] = []
         if nv.ram_used_pct is not None:
             pills.append(_pill("neutral", f"RAM {nv.ram_used_pct:.0f}%"))
@@ -1350,7 +1430,7 @@ def _render_fleet_trends(nodeviews: List[NodeView], hours: int) -> str:
 <div class="card trendcard">
   <div class="sectionhead">
     <div>
-      <div class="h2"><a href="/node/{_html_escape(nv.node)}?hours={hours}">{_html_escape(nv.node)}</a></div>
+      <div class="h2"><a href="/node/{_html_escape(nv.node)}?hours={hours}">{_html_escape(display_name)}</a></div>
       <div class="h2sub">{_html_escape(nv.model or nv.cpu or 'Hardware trends')}</div>
     </div>
     <div class="actions trendpills">
@@ -1364,15 +1444,11 @@ def _render_fleet_trends(nodeviews: List[NodeView], hours: int) -> str:
         )
 
     return f"""
-<div class="section" id="trends">
+<div class="section" id="fleet-trends">
   <div class="sectionhead">
     <div>
-      <div class="h2">Fleet trends</div>
+      <div class="h2">Trends</div>
       <div class="h2sub">Larger 72h graphs for persistent load, thermal behaviour, and pressure over time.</div>
-    </div>
-    <div class="actions">
-      <a class="btn" href="/dump?hours={hours}">Dump ({hours}h)</a>
-      <a class="btn" href="/diagnostics?hours={hours}">Diagnostics</a>
     </div>
   </div>
 
@@ -1391,11 +1467,12 @@ def _render_hidden_nodes(hidden_nodes: List[NodeView], hours: int) -> str:
     rows: List[str] = []
 
     for nv in hidden_nodes:
+        display_name = _display_node_name(nv.node)
         rows.append(
             f"""
 <div class="advrow">
   <div class="advleft">
-    <div class="advnode">{_html_escape(nv.node)} <span class="advsmall">{_html_escape(nv.model or nv.cpu or '')}</span></div>
+    <div class="advnode">{_html_escape(display_name)} <span class="advsmall">{_html_escape(nv.model or nv.cpu or '')}</span></div>
     <div class="advmsg">Hidden from Fleet, Inventory, and Diagnostics. Last seen {_html_escape(_ago(nv.ts))}.</div>
   </div>
   <div class="advright">
@@ -1407,7 +1484,7 @@ def _render_hidden_nodes(hidden_nodes: List[NodeView], hours: int) -> str:
         )
 
     return f"""
-<div class="section">
+<div class="section" id="hidden-nodes">
   <div class="sectionhead">
     <div>
       <div class="h2">Hidden nodes</div>
@@ -1422,6 +1499,7 @@ def _render_hidden_nodes(hidden_nodes: List[NodeView], hours: int) -> str:
 
 
 def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
+    display_name = _display_node_name(nv.node)
     dot = _sev_dot(nv.worst)
     model = f" ({nv.model})" if nv.model else ""
     agent_state = _agent_version_state(nv.agent_version, AGENT_VERSION)
@@ -1492,7 +1570,7 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
     <div class="left">
       <div class="title">
         <span class="{dot}"></span>
-        <a class="nodename" href="/node/{_html_escape(nv.node)}?hours={hours}">{_html_escape(nv.node)}</a>
+        <a class="nodename" href="/node/{_html_escape(nv.node)}?hours={hours}">{_html_escape(display_name)}</a>
         <span class="model">{_html_escape(model)}</span>
       </div>
       <div class="nodever {agent_state}">
@@ -1602,33 +1680,21 @@ def build_hidden_nodeviews(hours: int = 72) -> List[NodeView]:
     return nodeviews
 
 
-def render_fleet_page(hours: int, debug: bool) -> str:
+def render_fleet_live(hours: int, debug: bool) -> str:
     nodeviews = build_nodeviews(hours=hours)
     hidden_nodeviews = build_hidden_nodeviews(hours=hours)
-    generated = _utcnow().isoformat().replace("+00:00", "Z")
     brain_name = (os.environ.get("HARRY_BRAIN_NODE") or "brain").strip()
-    schema_current = _load_schema_current()
-
-    stale_n = sum(1 for n in nodeviews if n.stale)
-    bad_n = sum(1 for n in nodeviews if not n.stale and (n.advice_sev or "ok") == "bad")
-    warn_n = sum(1 for n in nodeviews if not n.stale and (n.advice_sev or "ok") == "warn")
-    healthy_n = max(0, len(nodeviews) - stale_n - bad_n - warn_n)
 
     fleet_stats_html = _render_fleet_stats(nodeviews)
     trends_html = _render_fleet_trends(nodeviews, hours=hours)
     hidden_html = _render_hidden_nodes(hidden_nodeviews, hours=hours)
 
     fleet_map_html = f"""
-<div class="section" id="fleet">
+<div class="section" id="fleet-overview">
   <div class="sectionhead">
     <div>
-      <div class="h2">Fleet overview</div>
+      <div class="h2">Overview</div>
       <div class="h2sub">Map, freshness, versions.</div>
-    </div>
-    <div class="actions">
-      <a class="btn" href="/inventory?hours={hours}">Inventory</a>
-      <a class="btn" href="/diagnostics?hours={hours}">Diagnostics</a>
-      <a class="btn" href="/dump?hours={hours}">Dump ({hours}h)</a>
     </div>
   </div>
 
@@ -1643,15 +1709,13 @@ def render_fleet_page(hours: int, debug: bool) -> str:
 </div>
 """
 
-    table_html = f"""
-<div class="section" id="summary">
+    if nodeviews:
+        table_html = f"""
+<div class="section" id="fleet-table">
   <div class="sectionhead">
     <div>
-      <div class="h2">Fleet table</div>
+      <div class="h2">Nodes</div>
       <div class="h2sub">Compact operational view.</div>
-    </div>
-    <div class="actions">
-      <a class="btn" href="/inventory?hours={hours}">Full inventory</a>
     </div>
   </div>
   <div class="invwrap">
@@ -1659,85 +1723,130 @@ def render_fleet_page(hours: int, debug: bool) -> str:
   </div>
 </div>
 """
-
-    footer_versions_html = (
-        f'<div class="footerline">'
-        f'Harry Brain {_html_escape(BRAIN_VERSION)} | '
-        f'Dist Agent {_html_escape(AGENT_VERSION)} | '
-        f'Schema {_html_escape(schema_current)}'
-        f"</div>"
-    )
-
-    body = f"""
-<div class="h1">HARRY — HARdware Review buddY</div>
-<div class="sub">
-  <span>Generated {generated}</span>
-  <span>·</span>
-  <span>{len(nodeviews)} nodes</span>
-  <span>·</span>
-  <span>{healthy_n} healthy</span>
-  <span>·</span>
-  <span>{stale_n} stale</span>
-  <span>·</span>
-  <span>{bad_n} bad</span>
-  <span>·</span>
-  <span>{warn_n} warn</span>
+    else:
+        table_html = """
+<div class="section" id="fleet-table">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">Nodes</div>
+      <div class="h2sub">Compact operational view.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="subtitle">Waiting for the first node to check in...</div>
+  </div>
 </div>
-
-{top_nav("fleet", hours, debug, len(nodeviews), stale_n + bad_n + warn_n)}
-
-{_render_top_banner(nodeviews)}
-{_fleet_outlier_pills(nodeviews)}
-{fleet_stats_html}
-{fleet_map_html}
-<div class="divider"></div>
-{table_html}
-<div class="divider"></div>
-{trends_html}
-{hidden_html}
-{footer_versions_html}
 """
 
-    return page_html("HARRY — Fleet", body, extra_js=JS_PULSE)
+    return f"""
+<div id="fleet-live" data-node-count="{len(nodeviews)}">
+  {_render_top_banner(nodeviews)}
+  {_fleet_outlier_pills(nodeviews)}
+  {fleet_stats_html}
+  {fleet_map_html}
+  <div class="divider"></div>
+  {table_html}
+  <div class="divider"></div>
+  {trends_html}
+  {hidden_html}
+</div>
+"""
 
 
-def render_diagnostics_panel(hours: int, debug: bool) -> str:
+def _fleet_polling_script(hours: int, debug: bool) -> str:
+    debug_q = "&debug=1" if debug else ""
+    return f"""
+<script>
+(function () {{
+  let attempts = 0;
+  let timer = null;
+  const maxAttempts = 24;
+  const url = "/fleet/partial?hours={hours}{debug_q}";
+
+  async function refreshFleet() {{
+    const current = document.getElementById("fleet-live");
+    if (!current) return;
+
+    try {{
+      const res = await fetch(url, {{ cache: "no-store" }});
+      if (!res.ok) return;
+
+      const html = await res.text();
+      const wrapper = document.createElement("div");
+      wrapper.innerHTML = html.trim();
+      const updated = wrapper.firstElementChild;
+      if (!updated) return;
+
+      current.replaceWith(updated);
+
+      const count = parseInt(updated.getAttribute("data-node-count") || "0", 10);
+      if (count > 0 && timer) {{
+        clearInterval(timer);
+        timer = null;
+      }}
+    }} catch (err) {{
+      console.warn("Fleet refresh failed", err);
+    }}
+
+    attempts += 1;
+    if (attempts >= maxAttempts && timer) {{
+      clearInterval(timer);
+      timer = null;
+    }}
+  }}
+
+  timer = setInterval(refreshFleet, 5000);
+  setTimeout(refreshFleet, 1500);
+}})();
+</script>
+"""
+
+
+def render_fleet_page(hours: int, debug: bool) -> str:
     nodeviews = build_nodeviews(hours=hours)
+    generated = _utcnow().isoformat().replace("+00:00", "Z")
+    schema_current = _load_schema_current()
+
     stale_n = sum(1 for n in nodeviews if n.stale)
     bad_n = sum(1 for n in nodeviews if not n.stale and (n.advice_sev or "ok") == "bad")
     warn_n = sum(1 for n in nodeviews if not n.stale and (n.advice_sev or "ok") == "warn")
-    info_n = sum(
-        1
-        for n in nodeviews
-        if not n.stale and any(str(a.get("severity") or "").lower() == "info" for a in (n.advice or []))
+    healthy_n = max(0, len(nodeviews) - stale_n - bad_n - warn_n)
+
+    sidebar_footer = (
+        f"Brain {_html_escape(BRAIN_VERSION)}<br/>"
+        f"Agent {_html_escape(AGENT_VERSION)}<br/>"
+        f"Schema {_html_escape(schema_current)}"
     )
-    return f"""
-<div class="h1">HARRY — Diagnostics</div>
-<div class="sub">
-  <span>{stale_n} stale</span>
-  <span>·</span>
-  <span>{bad_n} bad</span>
-  <span>·</span>
-  <span>{warn_n} warn</span>
-  <span>·</span>
-  <span>{info_n} info</span>
-</div>
-{top_nav("diagnostics", hours, debug, len(nodeviews), stale_n + bad_n + warn_n)}
-<div class="section">
-  <div class="sectionhead">
-    <div>
-      <div class="h2">Recommendations</div>
-      <div class="h2sub">Multiple findings, ordered by severity.</div>
-    </div>
-  </div>
-  {_render_advice_queue(nodeviews)}
-</div>
+
+    page_subtitle = (
+        f"<span>Generated {generated}</span>"
+        f"<span>·</span><span>{len(nodeviews)} nodes</span>"
+        f"<span>·</span><span>{healthy_n} healthy</span>"
+        f"<span>·</span><span>{stale_n} stale</span>"
+        f"<span>·</span><span>{bad_n} bad</span>"
+        f"<span>·</span><span>{warn_n} warn</span>"
+    )
+
+    content = f"""
+{render_fleet_live(hours=hours, debug=debug)}
+{_fleet_polling_script(hours=hours, debug=debug)}
 """
+
+    return render_shell(
+        title="HARRY — Fleet",
+        active_page="fleet",
+        page_title="Fleet",
+        page_subtitle=page_subtitle,
+        sidebar_sections=_fleet_sidebar(hours=hours, debug=debug),
+        actions=_global_actions(hours=hours, debug=debug),
+        content=content,
+        sidebar_footer=sidebar_footer,
+    )
 
 
 def render_node_cards_page(hours: int, debug: bool) -> str:
     nodeviews = build_nodeviews(hours=hours)
-    body = f"""
+    return f"""
 <div class="section" id="details">
   <div class="sectionhead">
     <div>
@@ -1751,4 +1860,3 @@ def render_node_cards_page(hours: int, debug: bool) -> str:
   </div>
 </div>
 """
-    return body

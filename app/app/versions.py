@@ -17,7 +17,7 @@
 # -----------------------------------------------------------------------------
 
 # Brain release version (calendar versioning)
-BRAIN_VERSION = "2026.03.08"
+BRAIN_VERSION = "2026.03.18"
 
 # Distributed agent script version (not the schema version)
 AGENT_VERSION = "0.2.3"

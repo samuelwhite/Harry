@@ -2,15 +2,12 @@
   <id>HarryAgent</id>
   <name>Harry Agent</name>
   <description>Harry hardware awareness agent</description>
-
   <executable>harry_agent.exe</executable>
   <workingdirectory>%BASE%</workingdirectory>
-
   <logpath>%BASE%</logpath>
   <log mode="roll-by-size">
     <sizeThreshold>10240</sizeThreshold>
     <keepFiles>3</keepFiles>
   </log>
-
-  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="10 sec"/>
 </service>
