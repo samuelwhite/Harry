@@ -41,6 +41,18 @@ router = APIRouter()
 def _detect_lan_ip() -> str | None:
     candidates: list[str] = []
 
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect(("8.8.8.8", 80))
+            ip = sock.getsockname()[0]
+            if ip and not ip.startswith("127.") and not ip.startswith("169.254."):
+                return ip
+        finally:
+            sock.close()
+    except Exception:
+        pass
+
     if sys.platform.startswith("win"):
         try:
             import subprocess
@@ -87,18 +99,6 @@ $ips | ConvertTo-Json -Compress
                     pass
         except Exception:
             pass
-
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            sock.connect(("8.8.8.8", 80))
-            ip = sock.getsockname()[0]
-            if ip:
-                candidates.append(ip)
-        finally:
-            sock.close()
-    except Exception:
-        pass
 
     try:
         hostname = socket.gethostname()
