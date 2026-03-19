@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import html
+import ipaddress
 import json
 import os
 import socket
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import quote
@@ -38,67 +40,167 @@ from app.ui.templates import render_shell
 router = APIRouter()
 
 
-def _detect_lan_ip() -> str | None:
+def _is_usable_private_ipv4(ip: str) -> bool:
+    ip = (ip or "").strip()
+    if not ip:
+        return False
+
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+
+    if addr.version != 4:
+        return False
+    if addr.is_loopback:
+        return False
+    if addr.is_link_local:
+        return False
+    if addr.is_unspecified:
+        return False
+    if not addr.is_private:
+        return False
+
+    return True
+
+
+def _score_lan_ip(ip: str) -> int:
+    if not _is_usable_private_ipv4(ip):
+        return -1000
+
+    score = 100
+
+    if ip.startswith("192.168."):
+        score += 20
+    elif ip.startswith("10."):
+        score += 10
+    elif ip.startswith("172."):
+        score += 5
+
+    # Common VirtualBox host-only subnet
+    if ip.startswith("192.168.56."):
+        score -= 100
+
+    return score
+
+
+def _udp_detect_lan_ip() -> str | None:
+    test_targets = [
+        ("8.8.8.8", 80),
+        ("1.1.1.1", 80),
+        ("192.0.2.1", 80),
+    ]
+
+    for host, port in test_targets:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                sock.connect((host, port))
+                ip = sock.getsockname()[0]
+                if _is_usable_private_ipv4(ip):
+                    return ip
+            finally:
+                sock.close()
+        except Exception:
+            continue
+
+    return None
+
+
+def _windows_ps_lan_candidates() -> list[str]:
     candidates: list[str] = []
 
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            sock.connect(("8.8.8.8", 80))
-            ip = sock.getsockname()[0]
-            if ip and not ip.startswith("127.") and not ip.startswith("169.254."):
-                return ip
-        finally:
-            sock.close()
-    except Exception:
-        pass
-
-    if sys.platform.startswith("win"):
-        try:
-            import subprocess
-
-            ps = r"""
-$ips = Get-CimInstance Win32_NetworkAdapterConfiguration |
+        ps = r"""
+$adapters = Get-CimInstance Win32_NetworkAdapterConfiguration |
     Where-Object {
         $_.IPEnabled -eq $true -and
         $_.IPAddress -ne $null
-    } |
-    ForEach-Object {
-        $_.IPAddress | Where-Object {
-            $_ -match '^\d+\.\d+\.\d+\.\d+$' -and
-            $_ -notlike '127.*' -and
-            $_ -notlike '169.254.*'
+    }
+
+$result = @()
+
+foreach ($adapter in $adapters) {
+    $desc = ""
+    if ($adapter.Description) { $desc = [string]$adapter.Description }
+
+    foreach ($ip in $adapter.IPAddress) {
+        if (
+            $ip -match '^\d+\.\d+\.\d+\.\d+$' -and
+            $ip -notlike '127.*' -and
+            $ip -notlike '169.254.*'
+        ) {
+            $result += [PSCustomObject]@{
+                ip = $ip
+                desc = $desc
+            }
         }
     }
-$ips | ConvertTo-Json -Compress
-"""
-            result = subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                    ps,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
+}
 
-            raw = (result.stdout or "").strip()
-            if raw:
-                try:
-                    parsed = json.loads(raw)
-                    if isinstance(parsed, str):
-                        candidates.append(parsed)
-                    elif isinstance(parsed, list):
-                        candidates.extend(str(x) for x in parsed if x)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+$result | ConvertTo-Json -Compress
+"""
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ps,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+        raw = (result.stdout or "").strip()
+        if not raw:
+            return candidates
+
+        parsed = json.loads(raw)
+
+        if isinstance(parsed, dict):
+            parsed = [parsed]
+
+        if isinstance(parsed, list):
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+
+                ip = str(item.get("ip") or "").strip()
+                desc = str(item.get("desc") or "").strip().lower()
+
+                if not _is_usable_private_ipv4(ip):
+                    continue
+
+                if any(
+                    hint in desc
+                    for hint in (
+                        "virtualbox",
+                        "vmware",
+                        "hyper-v",
+                        "hyperv",
+                        "vEthernet".lower(),
+                        "docker",
+                        "wsl",
+                        "loopback",
+                        "host-only",
+                        "host only",
+                    )
+                ):
+                    continue
+
+                candidates.append(ip)
+    except Exception:
+        pass
+
+    return candidates
+
+
+def _hostname_lan_candidates() -> list[str]:
+    candidates: list[str] = []
 
     try:
         hostname = socket.gethostname()
@@ -115,6 +217,22 @@ $ips | ConvertTo-Json -Compress
     except Exception:
         pass
 
+    return candidates
+
+
+def _detect_lan_ip() -> str | None:
+    # Strongly prefer the routed outbound address first.
+    udp_ip = _udp_detect_lan_ip()
+    if udp_ip:
+        return udp_ip
+
+    candidates: list[str] = []
+
+    if sys.platform.startswith("win"):
+        candidates.extend(_windows_ps_lan_candidates())
+
+    candidates.extend(_hostname_lan_candidates())
+
     seen: set[str] = set()
     filtered: list[str] = []
 
@@ -124,36 +242,16 @@ $ips | ConvertTo-Json -Compress
             continue
         seen.add(ip)
 
-        if ip.startswith("127."):
-            continue
-        if ip.startswith("169.254."):
+        if not _is_usable_private_ipv4(ip):
             continue
 
         filtered.append(ip)
 
-    for ip in filtered:
-        if ip.startswith("192.168."):
-            return ip
+    if not filtered:
+        return None
 
-    for ip in filtered:
-        if ip.startswith("10."):
-            return ip
-
-    for ip in filtered:
-        parts = ip.split(".")
-        if len(parts) == 4:
-            try:
-                first = int(parts[0])
-                second = int(parts[1])
-                if first == 172 and 16 <= second <= 31:
-                    return ip
-            except ValueError:
-                pass
-
-    if filtered:
-        return filtered[0]
-
-    return None
+    filtered.sort(key=_score_lan_ip, reverse=True)
+    return filtered[0]
 
 
 def _resolve_port(request: Request) -> int:
@@ -372,7 +470,7 @@ def downloads_page(request: Request) -> HTMLResponse:
         Copy
       </button>
     </div>
-    <div class="subtitle">Copy this address into the installer when prompted on another machine on your network.</div>
+    <div class="subtitle">Copy this full Brain address into the installer when prompted on another machine on your network.</div>
 
     <div style="height:12px;"></div>
 

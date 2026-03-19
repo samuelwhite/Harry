@@ -10,7 +10,7 @@ function Normalize-BrainUrl {
         [string]$InputUrl
     )
 
-    $url = $InputUrl.Trim()
+    $url = "$InputUrl".Trim()
 
     if ([string]::IsNullOrWhiteSpace($url)) {
         return $null
@@ -27,7 +27,7 @@ function Normalize-BrainUrl {
     try {
         $uri = [System.Uri]$url
     } catch {
-        throw "Invalid Harry Brain URL: $InputUrl"
+        throw "Invalid Harry Brain address: $InputUrl"
     }
 
     $scheme = $uri.Scheme
@@ -35,11 +35,11 @@ function Normalize-BrainUrl {
     $port = $uri.Port
 
     if ([string]::IsNullOrWhiteSpace($brainHost)) {
-        throw "Invalid Harry Brain URL: $InputUrl"
+        throw "Invalid Harry Brain address: $InputUrl"
     }
 
     # If no explicit port was supplied, Uri will give default 80/443.
-    # For Harry, default to 8787 unless user explicitly entered a port.
+    # For Harry, default to 8787 unless the user explicitly entered a port.
     $explicitPort = $false
     if ($InputUrl -match ":\d+(/|$)") {
         $explicitPort = $true
@@ -50,6 +50,127 @@ function Normalize-BrainUrl {
     }
 
     return "${scheme}://${brainHost}:${port}"
+}
+
+function Get-FirstLocalIPv4 {
+    try {
+        $ips = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+            Where-Object {
+                $_.IPAddress -notlike "127.*" -and
+                $_.IPAddress -notlike "169.254.*" -and
+                $_.PrefixOrigin -ne "WellKnown"
+            } |
+            Select-Object -ExpandProperty IPAddress
+
+        foreach ($ip in $ips) {
+            if (-not [string]::IsNullOrWhiteSpace($ip)) {
+                return $ip
+            }
+        }
+    } catch {
+    }
+
+    return $null
+}
+
+function Get-SubnetPrefix3 {
+    param (
+        [string]$Ip
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Ip)) {
+        return $null
+    }
+
+    $parts = $Ip.Split(".")
+    if ($parts.Length -ne 4) {
+        return $null
+    }
+
+    return ($parts[0..2] -join ".")
+}
+
+function Test-BrainReachability {
+    param (
+        [string]$BrainUrl
+    )
+
+    try {
+        $uri = [System.Uri]$BrainUrl
+    } catch {
+        throw "Invalid Harry Brain address: $BrainUrl"
+    }
+
+    $hostName = $uri.Host
+    $port = $uri.Port
+
+    if ($port -lt 1) {
+        $port = 8787
+    }
+
+    Write-Host ""
+    Write-Host "Checking connectivity to Harry Brain..."
+    Write-Host "Address: $BrainUrl"
+    Write-Host "Host   : $hostName"
+    Write-Host "Port   : $port"
+
+    $result = $null
+    try {
+        $result = Test-NetConnection -ComputerName $hostName -Port $port -WarningAction SilentlyContinue
+    } catch {
+        $result = $null
+    }
+
+    if ($result -and $result.TcpTestSucceeded) {
+        Write-Host "Connection check succeeded." -ForegroundColor Green
+        return
+    }
+
+    $localIp = Get-FirstLocalIPv4
+    $brainIp = $null
+
+    try {
+        $resolved = Resolve-DnsName -Name $hostName -Type A -ErrorAction Stop |
+            Where-Object { $_.IPAddress } |
+            Select-Object -First 1 -ExpandProperty IPAddress
+
+        if ($resolved) {
+            $brainIp = $resolved
+        }
+    } catch {
+        if ($hostName -match '^\d+\.\d+\.\d+\.\d+$') {
+            $brainIp = $hostName
+        }
+    }
+
+    Write-Host ""
+    Write-Host "ERROR: Could not reach Harry Brain at $BrainUrl" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "This usually means one of the following:" -ForegroundColor Yellow
+    Write-Host " - The Brain address is incorrect"
+    Write-Host " - Harry Brain is not running"
+    Write-Host " - The machines are on different networks without routing"
+    Write-Host " - A firewall is blocking the connection (TCP port $port)"
+    Write-Host ""
+    Write-Host "Try:" -ForegroundColor Cyan
+    Write-Host " - Open $BrainUrl in a browser from this machine"
+    Write-Host " - Check that the Brain machine is powered on and Harry Brain is running"
+    Write-Host " - Check both machines are on the same network, or that routing is allowed between them"
+    Write-Host " - Ensure TCP port $port is allowed through the firewall on the Brain machine"
+    Write-Host ""
+
+    if ($localIp -and $brainIp) {
+        $localPrefix = Get-SubnetPrefix3 -Ip $localIp
+        $brainPrefix = Get-SubnetPrefix3 -Ip $brainIp
+
+        if ($localPrefix -and $brainPrefix -and $localPrefix -ne $brainPrefix) {
+            Write-Host "Note: This machine ($localIp) appears to be on a different subnet than the Brain ($brainIp)." -ForegroundColor Yellow
+            Write-Host "      This requires routing or firewall rules between those networks."
+            Write-Host ""
+        }
+    }
+
+    throw "Harry Brain could not be reached."
 }
 
 $scriptPath = $MyInvocation.MyCommand.Path
@@ -118,8 +239,7 @@ if (Test-Path ".\HarryAgentService.exe") {
 if (-not (Test-Path $ConfigPath)) {
     Write-Host ""
     Write-Host "Enter the Harry Brain address."
-    Write-Host "This is the address of the machine running Harry Brain."
-    Write-Host "You can enter just an IP or hostname."
+    Write-Host "This is the full address of the machine running Harry Brain."
     Write-Host "Examples:"
     Write-Host "  192.168.1.20"
     Write-Host "  192.168.1.20:8787"
@@ -135,9 +255,11 @@ if (-not (Test-Path $ConfigPath)) {
 
     try {
         $brain = Normalize-BrainUrl $brainInput
+        Test-BrainReachability -BrainUrl $brain
     } catch {
         Write-Host ""
-        Write-Host "ERROR: $($_.Exception.Message)"
+        Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host ""
         Read-Host "Press Enter to exit"
         exit 1
     }
@@ -149,6 +271,17 @@ if (-not (Test-Path $ConfigPath)) {
     Write-Host ""
     Write-Host "Saved config to $ConfigPath"
     Write-Host "Brain URL: $brain"
+} else {
+    Write-Host ""
+    Write-Host "Existing config found at $ConfigPath"
+    try {
+        $existingConfig = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+        if ($existingConfig.brain_url) {
+            Write-Host "Brain URL: $($existingConfig.brain_url)"
+        }
+    } catch {
+        Write-Host "Could not read existing config."
+    }
 }
 
 Write-Host ""
