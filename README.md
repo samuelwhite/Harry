@@ -7,8 +7,8 @@ Experimental • Home Lab Tool • Quiet Infrastructure
 ![Release](https://img.shields.io/github/v/release/samuelwhite/Harry)
 ![Licence](https://img.shields.io/github/license/samuelwhite/Harry)
 
-![Harry Fleet](assets/harry-dashboard.png)
-![Harry Nodes](assets/harry-nodes.png)
+![Harry Fleet](assets/harry_dashboard.png)
+![Harry Nodes](assets/harry_dashboard_2.png)
 
 Harry is a lightweight **hardware awareness layer** for small multi-node environments.
 
