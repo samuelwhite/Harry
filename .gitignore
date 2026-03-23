@@ -20,6 +20,8 @@ installers/windows/iss/Output/
 dist/brain_server/_internal/base_library.zip
 installers/windows/brain-payload/_internal/base_library.zip
 installers/*.zip
+installers/windows/output
+installers/output
 
 # ----------------------------
 # Installer build dirs (keep output elsewhere)
