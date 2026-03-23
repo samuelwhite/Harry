@@ -223,7 +223,7 @@ def _ram_total_display(facts: Dict[str, Any], raw_facts: Dict[str, Any]) -> str:
 
         if ram_total_gb:
             if ram_max_gb and str(ram_max_gb) != str(ram_total_gb):
-                base = f"{ram_total_gb}GB / {ram_max_gb}GB"
+                base = f"{ram_total_gb}GB / firmware max {ram_max_gb}GB"
             else:
                 base = f"{ram_total_gb}GB / {ram_total_gb}GB"
         else:

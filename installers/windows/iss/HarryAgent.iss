@@ -109,6 +109,62 @@ begin
   Result := Exec(Filename, Params, WorkingDir, SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+procedure ExecBestEffort(const Filename, Params, WorkingDir: String);
+var
+  ResultCode: Integer;
+begin
+  Exec(Filename, Params, WorkingDir, SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure StopServiceIfExists(const ServiceName: string);
+begin
+  ExecBestEffort(ExpandConstant('{sys}\sc.exe'), 'stop "' + ServiceName + '"', '');
+end;
+
+procedure DeleteServiceIfExists(const ServiceName: string);
+begin
+  ExecBestEffort(ExpandConstant('{sys}\sc.exe'), 'delete "' + ServiceName + '"', '');
+end;
+
+procedure KillIfRunning(const ImageName: string);
+begin
+  ExecBestEffort(ExpandConstant('{sys}\taskkill.exe'), '/F /IM "' + ImageName + '" /T', '');
+end;
+
+procedure SleepSeconds(const Seconds: string);
+begin
+  ExecBestEffort(ExpandConstant('{sys}\timeout.exe'), '/T ' + Seconds + ' /NOBREAK', '');
+end;
+
+procedure RemoveExistingAgentArtifacts();
+var
+  ExePath: String;
+  ResultCode: Integer;
+begin
+  ExePath := ExpandConstant('{app}\HarryAgentService.exe');
+
+  StopServiceIfExists('HarryAgent');
+  StopServiceIfExists('HarryAgentService');
+
+  if FileExists(ExePath) then
+  begin
+    RunHidden(ExePath, 'stop', ExpandConstant('{app}'), ResultCode);
+    RunHidden(ExePath, 'uninstall', ExpandConstant('{app}'), ResultCode);
+  end;
+
+  SleepSeconds('2');
+
+  KillIfRunning('harry_agent.exe');
+  KillIfRunning('HarryAgentService.exe');
+
+  SleepSeconds('2');
+
+  DeleteServiceIfExists('HarryAgent');
+  DeleteServiceIfExists('HarryAgentService');
+
+  SleepSeconds('2');
+end;
+
 function TestBrainConnectivity(const BaseUrl: String; var Msg: String): Boolean;
 var
   PsFile: String;
@@ -213,6 +269,11 @@ begin
   BrainPage.Values[0] := 'localhost';
 end;
 
+function InitializeSetup(): Boolean;
+begin
+  Result := True;
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   TestMsg: String;
@@ -246,6 +307,11 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  if CurStep = ssInstall then
+  begin
+    RemoveExistingAgentArtifacts();
+  end;
+
   if CurStep = ssPostInstall then
   begin
     if WizardSilent then

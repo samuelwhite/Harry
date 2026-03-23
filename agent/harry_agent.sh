@@ -72,9 +72,9 @@ data["state"] = state
 data["stage"] = "collecting"
 data["last_run_at"] = now
 data.setdefault("consecutive_failures", 0)
-data["ok"] = True
-data.setdefault("error_code", None)
-data.setdefault("error_summary", None)
+data["ok"] = False if int(data.get("consecutive_failures") or 0) > 0 else True
+data["error_code"] = None
+data["error_summary"] = None
 
 fd, tmp = tempfile.mkstemp(
     prefix="harry-agent-status-",
@@ -110,9 +110,9 @@ data["state"] = data.get("state") or "running"
 data["stage"] = "sending"
 data["last_run_at"] = data.get("last_run_at") or now
 data.setdefault("consecutive_failures", 0)
-data["ok"] = True
-data.setdefault("error_code", None)
-data.setdefault("error_summary", None)
+data["ok"] = False if int(data.get("consecutive_failures") or 0) > 0 else True
+data["error_code"] = None
+data["error_summary"] = None
 
 fd, tmp = tempfile.mkstemp(
     prefix="harry-agent-status-",
@@ -231,7 +231,12 @@ else
   if [ -z "$HARRY_INGEST_URL" ] && [ -n "$HARRY_URL" ]; then
     HARRY_INGEST_URL="$HARRY_URL"
   fi
-  HARRY_INGEST_URL="${HARRY_INGEST_URL:-http://127.0.0.1:8787/ingest}"
+  HARRY_INGEST_URL="${HARRY_INGEST_URL:-}"
+
+  if [ -z "$HARRY_INGEST_URL" ]; then
+    echo "ERROR: Harry agent requires HARRY_BASE_URL or HARRY_INGEST_URL to be set." >&2
+    exit 21
+  fi
 
   if [[ "$HARRY_INGEST_URL" == */ingest ]]; then
     HARRY_BASE_URL="${HARRY_INGEST_URL%/ingest}"
@@ -497,6 +502,7 @@ ram_slots_total = None
 ram_slots_used = None
 ram_type = None
 ram_max_gb = None
+ram_total_gb = None
 
 if which("dmidecode"):
     model = run(["dmidecode","-s","system-product-name"]) or None
@@ -523,21 +529,36 @@ if which("dmidecode"):
         total = len(re.findall(r"^Memory Device$", memtxt, flags=re.MULTILINE))
         used = 0
         types = []
+        installed_gb = 0.0
+
         for msz in re.findall(r"^\s*Size:\s*(.+)$", memtxt, flags=re.MULTILINE):
-            s = (msz or "").strip().lower()
-            if not s: continue
-            if "no module installed" in s: continue
-            if s.startswith("0"): continue
+            raw = (msz or "").strip()
+            s = raw.lower()
+            if not s:
+                continue
+            if "no module installed" in s:
+                continue
+            if s.startswith("0"):
+                continue
+
             used += 1
+            gb = parse_capacity_to_gb(raw)
+            if gb:
+                installed_gb += gb
+
         for t in re.findall(r"^\s*Type:\s*(.+)$", memtxt, flags=re.MULTILINE):
             tt = (t or "").strip()
             if tt and tt.lower() not in ("unknown", "other"):
                 types.append(tt)
+
         if total > 0:
             ram_slots_total = total
             ram_slots_used = used
         if types:
             ram_type = types[0]
+        if installed_gb > 0:
+            ram_total_gb = int(round(installed_gb))
+
 
 cpu = None
 cpu_cores = None
@@ -554,7 +575,6 @@ if which("lscpu"):
             cpu_cores = to_int(v)
 
 meminfo = read("/proc/meminfo")
-ram_total_gb = None
 mem_used_pct = None
 try:
     d = {}
@@ -565,9 +585,8 @@ try:
     total_kb = d.get("MemTotal", 0)
     avail_kb = d.get("MemAvailable", 0)
     if total_kb > 0:
-        ram_total_gb = int(math.ceil(total_kb / 1024 / 1024))
         used = total_kb - avail_kb
-        mem_used_pct = (used/total_kb) * 100.0
+        mem_used_pct = (used / total_kb) * 100.0
 except Exception:
     pass
 
@@ -737,7 +756,9 @@ if which("sensors"):
         if m:
             temps[k] = float(m.group(1))
 
+facts_gpus = []
 gpus = []
+
 if which("nvidia-smi"):
     out = run([
         "nvidia-smi",
@@ -746,8 +767,17 @@ if which("nvidia-smi"):
     ])
     for line in [l.strip() for l in out.splitlines() if l.strip()]:
         parts = [p.strip() for p in line.split(",")]
-        if len(parts) < 7: continue
+        if len(parts) < 7:
+            continue
         name, driver, bus, util, temp, mem_t, mem_u = parts[:7]
+
+        facts_gpus.append({
+            "name": name,
+            "driver": driver,
+            "bus_id": bus,
+            "mem_total_mb": to_int(mem_t),
+        })
+
         gpus.append({
             "name": name,
             "driver": driver,
@@ -757,6 +787,41 @@ if which("nvidia-smi"):
             "mem_total_mb": to_int(mem_t),
             "mem_used_mb": to_int(mem_u),
         })
+
+if which("lspci"):
+    seen_gpu_names = {str((g.get("name") or "")).strip().lower() for g in facts_gpus}
+    have_nvidia_runtime = any("nvidia" in x for x in seen_gpu_names)
+
+    lspci_txt = run(["lspci"])
+    for line in lspci_txt.splitlines():
+        ll = line.lower()
+        if not any(x in ll for x in ("vga compatible controller", "3d controller", "display controller")):
+            continue
+
+        # Skip common integrated graphics for hardware inventory
+        if any(x in ll for x in (
+            "intel corporation hd graphics",
+            "intel corporation uhd graphics",
+            "intel corporation xe graphics",
+            "intel corporation xeon e3-1200",
+            "integrated graphics controller",
+            "advanced micro devices, inc. [amd/ati] raven ridge",
+            "radeon vega series / radeon vega mobile series",
+        )):
+            continue
+
+        # If nvidia-smi already found an NVIDIA GPU, skip lspci NVIDIA duplicates
+        if have_nvidia_runtime and "nvidia" in ll:
+            continue
+
+        name = line.split(": ", 1)[1].strip() if ": " in line else line.strip()
+        if name.strip().lower() in seen_gpu_names:
+            continue
+
+        facts_gpus.append({
+            "name": name,
+        })
+        seen_gpu_names.add(name.strip().lower())
 
 agent_status = read_agent_status()
 agent_status.setdefault("ok", True)
@@ -783,7 +848,7 @@ payload = {
     "bios_release_date": bios_release_date,
     "bios_version": bios_version,
     "disks": facts_disks,
-    "gpus": [],
+    "gpus": facts_gpus,
     "extensions": {}
   },
   "metrics": {

@@ -21,7 +21,8 @@ Name: "C:\ProgramData\Harry\brain\logs"
 
 [Files]
 Source: "..\brain-payload\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\..\..\downloads\*"; DestDir: "{app}\downloads"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\..\downloads\HarryAgentInstall.sh"; DestDir: "{app}\downloads"; Flags: ignoreversion
+Source: "..\..\..\downloads\HarryAgentSetup.exe"; DestDir: "{app}\downloads"; Flags: ignoreversion
 Source: "..\..\..\downloads\HarryAgentSetup.exe"; DestDir: "{tmp}"; Flags: ignoreversion
 Source: "..\brain-payload\open_firewall.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\brain-payload\remove_firewall.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -31,7 +32,6 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -NoProfile -File ""{app}\open_firewall.ps1"" -Port 8787"; Flags: runhidden waituntilterminated
 Filename: "{app}\HarryBrainService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated
 Filename: "{app}\HarryBrainService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""try {{ if (Get-Service -Name 'HarryAgentService' -ErrorAction SilentlyContinue) {{ Stop-Service -Name 'HarryAgentService' -Force -ErrorAction SilentlyContinue }} }} catch {{}} ; try {{ & sc.exe delete HarryAgentService | Out-Null }} catch {{}} ; Start-Sleep -Seconds 2 ; try {{ & taskkill.exe /F /IM harry_agent.exe /T | Out-Null }} catch {{}} ; try {{ & taskkill.exe /F /IM HarryAgentService.exe /T | Out-Null }} catch {{}}"""; Flags: runhidden waituntilterminated
 Filename: "{tmp}\HarryAgentSetup.exe"; Parameters: "/VERYSILENT"; Flags: waituntilterminated; StatusMsg: "Just finalising and setting up the Harry Agent on this machine..."
 Filename: "timeout.exe"; Parameters: "/T 3"; Flags: runhidden waituntilterminated
 Filename: "http://127.0.0.1:8787/"; Flags: shellexec postinstall skipifsilent
@@ -79,9 +79,24 @@ begin
   Exec(FileName, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+procedure StopServiceIfExists(const ServiceName: string);
+begin
+  ExecBestEffort(ExpandConstant('{sys}\sc.exe'), 'stop "' + ServiceName + '"');
+end;
+
+procedure DeleteServiceIfExists(const ServiceName: string);
+begin
+  ExecBestEffort(ExpandConstant('{sys}\sc.exe'), 'delete "' + ServiceName + '"');
+end;
+
 procedure KillIfRunning(const ImageName: string);
 begin
   ExecBestEffort(ExpandConstant('{sys}\taskkill.exe'), '/F /IM "' + ImageName + '" /T');
+end;
+
+procedure SleepSeconds(const Seconds: string);
+begin
+  ExecBestEffort(ExpandConstant('{sys}\timeout.exe'), '/T ' + Seconds + ' /NOBREAK');
 end;
 
 procedure DeleteHarryDataIfRequested();
@@ -96,13 +111,30 @@ end;
 
 procedure RemoveExistingInstallArtifacts();
 begin
+  StopServiceIfExists('HarryBrainService');
+  StopServiceIfExists('HarryAgent');
+  StopServiceIfExists('HarryAgentService');
+
+  SleepSeconds('2');
+
+  KillIfRunning('brain_server.exe');
+  KillIfRunning('HarryBrainService.exe');
+  KillIfRunning('harry_agent.exe');
+  KillIfRunning('HarryAgentService.exe');
+
+  SleepSeconds('2');
+
   if FileExists(ExpandConstant('{app}\HarryBrainService.exe')) then
   begin
     ExecBestEffort(ExpandConstant('{app}\HarryBrainService.exe'), 'stop');
     ExecBestEffort(ExpandConstant('{app}\HarryBrainService.exe'), 'uninstall');
   end;
 
-  KillIfRunning('HarryBrainService.exe');
+  DeleteServiceIfExists('HarryBrainService');
+  DeleteServiceIfExists('HarryAgent');
+  DeleteServiceIfExists('HarryAgentService');
+
+  SleepSeconds('2');
 
   if FileExists(ExpandConstant('{app}\remove_firewall.ps1')) then
   begin

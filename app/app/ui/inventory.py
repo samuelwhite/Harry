@@ -180,7 +180,7 @@ def _inventory_md(rows: List[Dict[str, Any]]) -> str:
         if rt is not None:
             ram_bits.append(f"{rt}GB")
         if rm is not None and rm != rt:
-            ram_bits.append(f"max {rm}GB")
+            ram_bits.append(f"firmware max {rm}GB")
         if rs is not None:
             ram_bits.append(f"slots {ru or '—'}/{rs}")
         if rtype:
@@ -223,7 +223,7 @@ def _fmt_ram(r: Dict[str, Any]) -> str:
     if rt is not None:
         parts.append(f"{rt}GB")
     if rm is not None and rm != rt:
-        parts.append(f"max {rm}GB")
+        parts.append(f"firmware max {rm}GB")
     if rs is not None:
         parts.append(f"slots {ru or '—'}/{rs}")
     if rtype:
