@@ -3,4 +3,4 @@ services:
     ports:
       - "0.0.0.0:8789:8787"
     environment:
-      HARRY_SCREENSHOT_MODE: "true"
+      HARRY_SCREENSHOT_MODE: "false"
