@@ -790,14 +790,34 @@ if which("nvidia-smi"):
 
 if which("lspci"):
     seen_gpu_names = {str((g.get("name") or "")).strip().lower() for g in facts_gpus}
+    have_nvidia_runtime = any("nvidia" in x for x in seen_gpu_names)
+
     lspci_txt = run(["lspci"])
     for line in lspci_txt.splitlines():
         ll = line.lower()
         if not any(x in ll for x in ("vga compatible controller", "3d controller", "display controller")):
             continue
+
+        # Skip common integrated graphics for hardware inventory
+        if any(x in ll for x in (
+            "intel corporation hd graphics",
+            "intel corporation uhd graphics",
+            "intel corporation xe graphics",
+            "intel corporation xeon e3-1200",
+            "integrated graphics controller",
+            "advanced micro devices, inc. [amd/ati] raven ridge",
+            "radeon vega series / radeon vega mobile series",
+        )):
+            continue
+
+        # If nvidia-smi already found an NVIDIA GPU, skip lspci NVIDIA duplicates
+        if have_nvidia_runtime and "nvidia" in ll:
+            continue
+
         name = line.split(": ", 1)[1].strip() if ": " in line else line.strip()
         if name.strip().lower() in seen_gpu_names:
             continue
+
         facts_gpus.append({
             "name": name,
         })
