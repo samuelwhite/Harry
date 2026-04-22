@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${HARRY_BASE_URL:?Set HARRY_BASE_URL, e.g. http://192.168.1.10:8787}"
-
 AGENT_DIR="${HARRY_AGENT_DIR:-/opt/harry/agent}"
 AGENT_PATH="${AGENT_DIR}/harry_agent.sh"
 TMP_AGENT="$(mktemp /tmp/harry_agent_install.XXXXXX.sh)"
 ALLOW_REPOINT="${HARRY_ALLOW_REPOINT:-0}"
+HARRY_BASE_URL="${HARRY_BASE_URL:-}"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1
@@ -113,7 +112,7 @@ ensure_required_runtime
 install_optional_enrichers
 
 EXISTING_BASE_URL="$(current_configured_base_url || true)"
-if [ -n "${EXISTING_BASE_URL:-}" ] && [ "${EXISTING_BASE_URL%/}" != "${HARRY_BASE_URL%/}" ]; then
+if [ -n "${HARRY_BASE_URL:-}" ] && [ -n "${EXISTING_BASE_URL:-}" ] && [ "${EXISTING_BASE_URL%/}" != "${HARRY_BASE_URL%/}" ]; then
   if [ "$ALLOW_REPOINT" != "1" ]; then
     echo "ERROR: Existing Harry agent is already configured for a different Brain." >&2
     echo "Existing: ${EXISTING_BASE_URL}" >&2
@@ -130,8 +129,14 @@ fi
 
 mkdir -p "$AGENT_DIR"
 
-echo "==> Downloading Harry agent from ${HARRY_BASE_URL}/dist/harry_agent.sh"
-curl -fsSL "${HARRY_BASE_URL}/dist/harry_agent.sh" -o "$TMP_AGENT"
+if [ -n "${HARRY_BASE_URL:-}" ]; then
+  echo "==> Downloading Harry agent from ${HARRY_BASE_URL}/dist/harry_agent.sh"
+  curl -fsSL "${HARRY_BASE_URL}/dist/harry_agent.sh" -o "$TMP_AGENT"
+else
+  echo "==> Installing bundled Harry agent (runtime discovery will resolve the Brain URL)"
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  cp "$SCRIPT_DIR/../agent/harry_agent.sh" "$TMP_AGENT"
+fi
 
 if [ ! -s "$TMP_AGENT" ]; then
   echo "ERROR: downloaded agent was empty." >&2
@@ -162,11 +167,16 @@ Type=oneshot
 User=root
 Group=root
 Environment="HARRY_SELF_UPDATE=1"
-Environment="HARRY_BASE_URL=${HARRY_BASE_URL}"
-Environment="HARRY_INGEST_URL=${HARRY_BASE_URL}/ingest"
 ExecStart=${AGENT_PATH}
 SuccessExitStatus=0
 EOF_UNIT
+
+if [ -n "${HARRY_BASE_URL:-}" ]; then
+  cat >> /etc/systemd/system/harry-agent.service <<EOF_UNIT
+Environment="HARRY_BASE_URL=${HARRY_BASE_URL}"
+Environment="HARRY_INGEST_URL=${HARRY_BASE_URL}/ingest"
+EOF_UNIT
+fi
 
 cat > /etc/systemd/system/harry-agent.timer <<'EOF_TIMER'
 [Unit]

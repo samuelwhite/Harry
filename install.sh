@@ -114,6 +114,62 @@ require_cmd_or_fail() {
   fi
 }
 
+configure_avahi_mdns() {
+  local brain_ip="$1"
+  local avahi_hosts="/etc/avahi/hosts"
+  local avahi_service_dir="/etc/avahi/services"
+  local avahi_service_file="${avahi_service_dir}/harry-brain.service"
+  local tmp_hosts
+  local tmp_service
+
+  if [ -z "${brain_ip:-}" ] || [ "$brain_ip" = "127.0.0.1" ] || [ "$brain_ip" = "localhost" ]; then
+    echo "WARNING: Skipping Avahi setup because no usable LAN IP was detected." >&2
+    return 1
+  fi
+
+  if ! need_cmd systemctl; then
+    echo "WARNING: Skipping Avahi setup because systemctl is unavailable." >&2
+    return 1
+  fi
+
+  if ! command -v avahi-daemon >/dev/null 2>&1; then
+    echo "==> Installing Avahi packages for mDNS..."
+    install_packages avahi-daemon avahi-utils || return 1
+  fi
+
+  mkdir -p /etc/avahi "$avahi_service_dir"
+
+  tmp_hosts="$(mktemp /tmp/harry_avahi_hosts.XXXXXX)"
+  if [ -f "$avahi_hosts" ]; then
+    grep -vE '(^|[[:space:]])harry-brain\.local([[:space:]]|$)' "$avahi_hosts" > "$tmp_hosts" || true
+  fi
+  printf '%s %s\n' "$brain_ip" "harry-brain.local" >> "$tmp_hosts"
+  install -m 0644 "$tmp_hosts" "$avahi_hosts"
+  rm -f "$tmp_hosts"
+
+  tmp_service="$(mktemp /tmp/harry_avahi_service.XXXXXX)"
+  cat > "$tmp_service" <<'EOF_AVAHI'
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+
+<service-group>
+  <name replace-wildcards="yes">Harry Brain on %h</name>
+  <host-name>harry-brain.local</host-name>
+  <service>
+    <type>_http._tcp</type>
+    <port>8787</port>
+    <txt-record>service=harry-brain</txt-record>
+    <txt-record>path=/</txt-record>
+  </service>
+</service-group>
+EOF_AVAHI
+  install -m 0644 "$tmp_service" "$avahi_service_file"
+  rm -f "$tmp_service"
+
+  systemctl enable avahi-daemon >/dev/null 2>&1 || true
+  systemctl restart avahi-daemon
+}
+
 ensure_curl
 
 require_cmd_or_fail docker "Install Docker first, then rerun ./install.sh"
@@ -271,6 +327,14 @@ if [ "$LISTEN" = "127.0.0.1" ]; then
 else
   HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
   HOST_IP="${HOST_IP:-$(hostname 2>/dev/null || echo localhost)}"
+fi
+
+if [ "$LISTEN" = "0.0.0.0" ]; then
+  if configure_avahi_mdns "$HOST_IP"; then
+    echo "mDNS:  http://harry-brain.local:${PORT}/"
+  else
+    echo "WARNING: Avahi mDNS setup failed; continuing without harry-brain.local." >&2
+  fi
 fi
 
 echo

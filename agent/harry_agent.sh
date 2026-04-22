@@ -39,10 +39,17 @@ log_fail() {
 # -----------------------------------------------------------------------------
 STATUS_DIR="${HARRY_STATUS_DIR:-/var/lib/harry-agent}"
 STATUS_FILE="${HARRY_STATUS_FILE:-$STATUS_DIR/status.json}"
+DEFAULT_BRAIN_URL_CACHE="${HARRY_AGENT_DIR:-/opt/harry/agent}/brain_url.txt"
+BRAIN_URL_CACHE_FILE="${HARRY_BRAIN_URL_CACHE_FILE:-$DEFAULT_BRAIN_URL_CACHE}"
 
 if ! mkdir -p "$STATUS_DIR" >/dev/null 2>&1; then
   STATUS_DIR="/tmp"
   STATUS_FILE="${HARRY_STATUS_FILE:-$STATUS_DIR/status.json}"
+fi
+
+brain_url_cache_dir="$(dirname "$BRAIN_URL_CACHE_FILE")"
+if ! mkdir -p "$brain_url_cache_dir" >/dev/null 2>&1; then
+  BRAIN_URL_CACHE_FILE="/tmp/harry-brain-url.txt"
 fi
 
 iso_now() {
@@ -224,26 +231,82 @@ HARRY_BASE_URL="${HARRY_BASE_URL:-}"
 HARRY_INGEST_URL="${HARRY_INGEST_URL:-}"
 HARRY_URL="${HARRY_URL:-}"
 
-if [ -n "$HARRY_BASE_URL" ]; then
-  HARRY_BASE_URL="${HARRY_BASE_URL%/}"
-  HARRY_INGEST_URL="${HARRY_INGEST_URL:-$HARRY_BASE_URL/ingest}"
-else
-  if [ -z "$HARRY_INGEST_URL" ] && [ -n "$HARRY_URL" ]; then
-    HARRY_INGEST_URL="$HARRY_URL"
+read_cached_brain_url() {
+  if [ -f "$BRAIN_URL_CACHE_FILE" ]; then
+    head -n1 "$BRAIN_URL_CACHE_FILE" 2>/dev/null | tr -d '\r' | sed 's/[[:space:]]*$//'
   fi
-  HARRY_INGEST_URL="${HARRY_INGEST_URL:-}"
+}
 
-  if [ -z "$HARRY_INGEST_URL" ]; then
-    echo "ERROR: Harry agent requires HARRY_BASE_URL or HARRY_INGEST_URL to be set." >&2
-    exit 21
+cache_brain_url() {
+  local url="${1:-}"
+  [ -n "$url" ] || return 0
+  printf '%s\n' "${url%/}" > "$BRAIN_URL_CACHE_FILE" 2>/dev/null || true
+}
+
+brain_health_ok() {
+  local base_url="${1:-}"
+  [ -n "$base_url" ] || return 1
+  local health_url="${base_url%/}/health"
+  local code
+  code="$("$CURL" -sS -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 5 "$health_url" 2>/dev/null || true)"
+  [ "$code" = "200" ]
+}
+
+resolve_brain_url() {
+  local candidates=()
+  local candidate
+  local cached
+
+  if [ -n "${HARRY_BASE_URL:-}" ]; then
+    echo "${HARRY_BASE_URL%/}"
+    return 0
   fi
 
-  if [[ "$HARRY_INGEST_URL" == */ingest ]]; then
-    HARRY_BASE_URL="${HARRY_INGEST_URL%/ingest}"
-  else
-    HARRY_BASE_URL="${HARRY_INGEST_URL%/*}"
+  if [ -n "${HARRY_INGEST_URL:-}" ]; then
+    if [[ "$HARRY_INGEST_URL" == */ingest ]]; then
+      echo "${HARRY_INGEST_URL%/ingest}"
+    else
+      echo "${HARRY_INGEST_URL%/*}"
+    fi
+    return 0
   fi
+
+  if [ -n "${HARRY_URL:-}" ]; then
+    if [[ "$HARRY_URL" == */ingest ]]; then
+      echo "${HARRY_URL%/ingest}"
+    else
+      echo "${HARRY_URL%/*}"
+    fi
+    return 0
+  fi
+
+  cached="$(read_cached_brain_url || true)"
+  if [ -n "$cached" ]; then
+    candidates+=("${cached%/}")
+  fi
+  candidates+=("http://harry-brain.local:8787" "http://localhost:8787")
+
+  for candidate in "${candidates[@]}"; do
+    [ -n "$candidate" ] || continue
+    if brain_health_ok "$candidate"; then
+      cache_brain_url "$candidate"
+      echo "${candidate%/}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+if ! HARRY_BASE_URL="$(resolve_brain_url)"; then
+  echo "ERROR: Harry agent could not determine the Brain URL." >&2
+  echo "Tried, in order: HARRY_BASE_URL, cached last-known-good URL, http://harry-brain.local:8787, http://localhost:8787" >&2
+  echo "Set HARRY_BASE_URL explicitly or ensure the Brain is reachable on one of the fallback addresses." >&2
+  exit 21
 fi
+
+HARRY_BASE_URL="${HARRY_BASE_URL%/}"
+HARRY_INGEST_URL="${HARRY_INGEST_URL:-$HARRY_BASE_URL/ingest}"
 
 DIST_URL="${HARRY_BASE_URL%/}/dist/harry_agent.sh"
 
@@ -935,6 +998,7 @@ if [ "$HTTP_CODE" != "200" ]; then
   exit 0
 fi
 
+cache_brain_url "$HARRY_BASE_URL"
 status_mark_success
 rm -f "$TMP_PAYLOAD" "$TMP_ERR" "$TMP_RESP" >/dev/null 2>&1 || true
 exit 0
