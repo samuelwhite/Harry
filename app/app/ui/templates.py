@@ -850,9 +850,76 @@ table.inv {
 }
 
 .badgetxt.ok { border-color: rgba(52,211,153,0.25); background: rgba(52,211,153,0.08); }
+.badgetxt.info { border-color: rgba(96,165,250,0.35); background: rgba(96,165,250,0.10); }
 .badgetxt.warn { border-color: rgba(251,191,36,0.35); background: rgba(251,191,36,0.10); }
 .badgetxt.bad { border-color: rgba(251,113,133,0.35); background: rgba(251,113,133,0.10); }
 .badgetxt.stale { border-color: rgba(251,113,133,0.35); background: rgba(251,113,133,0.10); }
+
+.activityfeed {
+  display: flex;
+  flex-direction: column;
+}
+
+.activityrow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.activityrow:last-child { border-bottom: none; }
+
+.activityleft {
+  min-width: 0;
+}
+
+.activitytitle {
+  font-weight: 950;
+  letter-spacing: 0.2px;
+}
+
+.activitymsg {
+  margin-top: 4px;
+  color: rgba(255,255,255,0.82);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.activitymeta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  text-align: right;
+}
+
+.activitynode {
+  font-size: 12px;
+  color: rgba(255,255,255,0.68);
+}
+
+.activitystate {
+  border: 1px dashed rgba(255,255,255,0.14);
+  border-radius: 16px;
+  background: rgba(255,255,255,0.025);
+  color: var(--muted);
+  padding: 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.activitystate.loading {
+  color: rgba(255,255,255,0.76);
+}
+
+.activitystate.error {
+  border-style: solid;
+  border-color: rgba(251,113,133,0.35);
+  background: rgba(251,113,133,0.08);
+  color: rgba(255,255,255,0.90);
+}
 
 .advrow {
   display: flex;

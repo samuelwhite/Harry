@@ -24,6 +24,7 @@ from app.ui.db import (
     _safe_str,
     _utcnow,
     _clamp,
+    get_recent_events,
 )
 from app.ui.templates import (
     _ago,
@@ -136,6 +137,97 @@ def _headline_line(sev: str) -> str:
     if sev == "info":
         return "Not urgent. Just noted."
     return "Nothing concerning detected."
+
+
+def _event_level_class(level: str) -> str:
+    sev = (level or "").strip().lower()
+    if sev in ("error", "danger", "critical"):
+        return "bad"
+    if sev in ("warning", "warn", "degraded"):
+        return "warn"
+    if sev in ("success", "ok", "healthy"):
+        return "ok"
+    return "info"
+
+
+def _event_level_label(level: str) -> str:
+    sev = (level or "info").strip().lower()
+    if sev in ("error", "danger", "critical"):
+        return "ERROR"
+    if sev in ("warning", "warn", "degraded"):
+        return "WARNING"
+    if sev in ("success", "ok", "healthy"):
+        return "SUCCESS"
+    return "INFO"
+
+
+def _render_activity_body(events: List[Dict[str, Any]], loading: bool = False, error: Optional[str] = None) -> str:
+    if error:
+        return f'<div class="activitystate error">{_html_escape(error)}</div>'
+    if loading:
+        return '<div class="activitystate loading">Loading recent activity…</div>'
+    if not events:
+        return '<div class="activitystate">No recent activity yet. Harry will note changes here as nodes check in.</div>'
+
+    rows: List[str] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        level = _event_level_class(str(event.get("level") or "info"))
+        title = _safe_str(event.get("title") or event.get("type") or "Event")
+        message = _safe_str(event.get("message") or "")
+        created_at = _parse_ts(_safe_str(event.get("created_at") or ""))
+        ago = _ago(created_at)
+        node_id = _safe_str(event.get("node_id") or event.get("machine_id") or "")
+        node_html = ""
+        if node_id:
+            node_html = (
+                f'<a class="activitynode" href="/node/{quote(node_id)}?hours=72">'
+                f'{_html_escape(_display_node_name(node_id))}</a>'
+            )
+
+        rows.append(
+            f"""
+<div class="activityrow">
+  <div class="activityleft">
+    <div class="activitytitle">{_html_escape(title)}</div>
+    <div class="activitymsg">{_html_escape(message)}</div>
+  </div>
+  <div class="activitymeta">
+    <span class="badgetxt {level}">{_event_level_label(str(event.get("level") or "info"))}</span>
+    <span class="pill neutral">{_html_escape(ago)}</span>
+    {node_html}
+  </div>
+</div>
+"""
+        )
+
+    if not rows:
+        return '<div class="activitystate">No recent activity yet. Harry will note changes here as nodes check in.</div>'
+
+    return "".join(rows)
+
+
+def _render_activity_section(events: List[Dict[str, Any]], loading: bool = False, error: Optional[str] = None) -> str:
+    body = _render_activity_body(events, loading=loading, error=error)
+    count_txt = "Loading…" if loading else ("Unavailable" if error else f"{len(events)} events")
+    return f"""
+<div class="section" id="activity-feed">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">Recent activity</div>
+      <div class="h2sub">A small feed of the things Harry noticed most recently.</div>
+    </div>
+    <div class="pill neutral" data-activity-feed-count>{_html_escape(count_txt)}</div>
+  </div>
+
+  <div class="card">
+    <div class="activityfeed" data-activity-feed>
+      {body}
+    </div>
+  </div>
+</div>
+"""
 
 
 def _bios_display(facts: Dict[str, Any], raw_facts: Dict[str, Any]) -> str:
@@ -1740,10 +1832,15 @@ def render_fleet_live(hours: int, debug: bool) -> str:
     nodeviews = build_nodeviews(hours=hours)
     hidden_nodeviews = build_hidden_nodeviews(hours=hours)
     brain_name = (os.environ.get("HARRY_BRAIN_NODE") or "brain").strip()
+    try:
+        activity_events = get_recent_events(limit=8, sync_stale=True)
+    except Exception:
+        activity_events = []
 
     fleet_stats_html = _render_fleet_stats(nodeviews)
     trends_html = _render_fleet_trends(nodeviews, hours=hours)
     hidden_html = _render_hidden_nodes(hidden_nodeviews, hours=hours)
+    activity_html = _render_activity_section(activity_events)
 
     if len(nodeviews) == 1:
         primary = nodeviews[0]
@@ -1754,6 +1851,8 @@ def render_fleet_live(hours: int, debug: bool) -> str:
   {_render_single_node_overview(primary, hours=hours)}
   <div class="divider"></div>
   {_render_node_card(primary, hours=hours, debug=debug)}
+  <div class="divider"></div>
+  {activity_html}
   <div class="divider"></div>
   {_render_fleet_trends([primary], hours=hours)}
   {hidden_html}
@@ -1811,6 +1910,9 @@ def render_fleet_live(hours: int, debug: bool) -> str:
   {_render_top_banner(nodeviews)}
   {_fleet_outlier_pills(nodeviews)}
   {fleet_stats_html}
+  <div class="divider"></div>
+  {activity_html}
+  <div class="divider"></div>
   {fleet_map_html}
   <div class="divider"></div>
   {table_html}
@@ -1870,6 +1972,127 @@ def _fleet_polling_script(hours: int, debug: bool) -> str:
 """
 
 
+def _activity_polling_script() -> str:
+    return """
+<script>
+(function () {
+  const url = "/api/events?limit=8";
+  const POLL_MS = 12000;
+  let timer = null;
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function levelClass(level) {
+    const sev = String(level || "").toLowerCase();
+    if (sev === "error" || sev === "danger" || sev === "critical") return "bad";
+    if (sev === "warning" || sev === "warn" || sev === "degraded") return "warn";
+    if (sev === "success" || sev === "ok" || sev === "healthy") return "ok";
+    return "info";
+  }
+
+  function levelLabel(level) {
+    const sev = String(level || "info").toLowerCase();
+    if (sev === "error" || sev === "danger" || sev === "critical") return "ERROR";
+    if (sev === "warning" || sev === "warn" || sev === "degraded") return "WARNING";
+    if (sev === "success" || sev === "ok" || sev === "healthy") return "SUCCESS";
+    return "INFO";
+  }
+
+  function relativeTime(date) {
+    if (!date || isNaN(date.getTime())) return "unknown";
+    const deltaMs = Date.now() - date.getTime();
+    const deltaSec = Math.floor(deltaMs / 1000);
+    if (deltaSec < 60) return "just now";
+    const mins = Math.floor(deltaSec / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+  }
+
+  function activityRow(event) {
+    const level = levelClass(event && event.level);
+    const title = escapeHtml((event && (event.title || event.type)) || "Event");
+    const message = escapeHtml((event && event.message) || "");
+    const node = String((event && (event.node_id || event.machine_id)) || "").trim();
+    const nodeHtml = node
+      ? `<a class="activitynode" href="/node/${encodeURIComponent(node)}?hours=72">${escapeHtml(node)}</a>`
+      : "";
+    const createdAt = event && event.created_at ? new Date(event.created_at) : null;
+    const ago = relativeTime(createdAt);
+
+    return `
+<div class="activityrow">
+  <div class="activityleft">
+    <div class="activitytitle">${title}</div>
+    <div class="activitymsg">${message}</div>
+  </div>
+  <div class="activitymeta">
+    <span class="badgetxt ${level}">${levelLabel(event && event.level)}</span>
+    <span class="pill neutral">${escapeHtml(ago)}</span>
+    ${nodeHtml}
+  </div>
+</div>`;
+  }
+
+  function loadingState() {
+    return '<div class="activitystate loading">Loading recent activity…</div>';
+  }
+
+  function emptyState() {
+    return '<div class="activitystate">No recent activity yet. Harry will note changes here as nodes check in.</div>';
+  }
+
+  function errorState() {
+    return '<div class="activitystate error">Recent activity is unavailable right now.</div>';
+  }
+
+  async function refreshActivityFeed() {
+    const body = document.querySelector("[data-activity-feed]");
+    const count = document.querySelector("[data-activity-feed-count]");
+    if (!body) return;
+
+    if (count) {
+      count.textContent = "Refreshing…";
+    }
+
+    body.innerHTML = loadingState();
+
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`http_${res.status}`);
+
+      const data = await res.json();
+      const events = Array.isArray(data && data.events) ? data.events : [];
+      if (!events.length) {
+        body.innerHTML = emptyState();
+        if (count) count.textContent = "0 events";
+        return;
+      }
+
+      body.innerHTML = events.slice(0, 8).map(activityRow).join("");
+      if (count) count.textContent = `${events.length} event${events.length === 1 ? "" : "s"}`;
+    } catch (err) {
+      body.innerHTML = errorState();
+      if (count) count.textContent = "Unavailable";
+    }
+  }
+
+  refreshActivityFeed();
+  timer = setInterval(refreshActivityFeed, POLL_MS);
+})();
+</script>
+"""
+
+
 def render_fleet_page(hours: int, debug: bool) -> str:
     nodeviews = build_nodeviews(hours=hours)
     generated = _utcnow().isoformat().replace("+00:00", "Z")
@@ -1898,6 +2121,7 @@ def render_fleet_page(hours: int, debug: bool) -> str:
     content = f"""
 {render_fleet_live(hours=hours, debug=debug)}
 {_fleet_polling_script(hours=hours, debug=debug)}
+{_activity_polling_script()}
 """
 
     return render_shell(

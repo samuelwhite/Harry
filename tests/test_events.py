@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 import app.config as config
 import app.main as main
 from app import machine_summary as ms
+from app.ui import fleet as fleet_ui
 from app.ui import db as dbmod
 
 
@@ -90,3 +91,34 @@ def test_summary_refresh_records_event(monkeypatch, tmp_path):
 
     events = dbmod.get_recent_events(limit=10, sync_stale=False)
     assert any(event["type"] == "summary.refreshed" for event in events)
+
+
+def test_fleet_view_includes_recent_activity(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    with TestClient(main.app) as client:
+        r = client.post("/ingest", json=_snapshot(now))
+        assert r.status_code == 200
+
+    dbmod.record_event(
+        level="info",
+        type="demo.note",
+        title="Demo event",
+        message="Harry noticed something worth mentioning.",
+        node_id="node-1",
+    )
+
+    html = fleet_ui.render_fleet_live(hours=72, debug=False)
+
+    assert "Recent activity" in html
+    assert "Demo event" in html
+    assert "Harry noticed something worth mentioning." in html
+
+
+def test_fleet_view_shows_empty_activity_state(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+
+    html = fleet_ui.render_fleet_live(hours=72, debug=False)
+
+    assert "No recent activity yet" in html
