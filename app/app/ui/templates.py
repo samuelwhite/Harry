@@ -5,14 +5,14 @@ from typing import Iterable, Optional
 
 CSS = """
 :root {
-  --bgA: #0b1220;
-  --bgB: #0a1830;
-  --bgC: #0b1a2b;
-  --panel: rgba(255,255,255,0.05);
-  --panel-strong: rgba(255,255,255,0.08);
-  --panel-soft: rgba(255,255,255,0.035);
-  --stroke: rgba(255,255,255,0.12);
-  --stroke-strong: rgba(255,255,255,0.18);
+  --bgA: #08101d;
+  --bgB: #091427;
+  --bgC: #07101c;
+  --panel: rgba(255,255,255,0.045);
+  --panel-strong: rgba(255,255,255,0.075);
+  --panel-soft: rgba(255,255,255,0.028);
+  --stroke: rgba(255,255,255,0.10);
+  --stroke-strong: rgba(255,255,255,0.16);
   --text: rgba(255,255,255,0.92);
   --muted: rgba(255,255,255,0.62);
 
@@ -41,10 +41,10 @@ body {
   min-height: 100vh;
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
   background:
-    radial-gradient(900px 700px at 20% 18%, rgba(90,110,255,0.24), rgba(10,18,32,0.0) 60%),
-    radial-gradient(900px 700px at 82% 10%, rgba(120,70,255,0.18), rgba(10,18,32,0.0) 55%),
-    radial-gradient(900px 700px at 60% 92%, rgba(0,210,255,0.10), rgba(10,18,32,0.0) 55%),
-    linear-gradient(180deg, var(--bgB) 0%, var(--bgA) 48%, #070b14 100%);
+    radial-gradient(920px 720px at 16% 16%, rgba(88,120,255,0.16), rgba(10,18,32,0.0) 60%),
+    radial-gradient(840px 640px at 84% 12%, rgba(84,200,255,0.10), rgba(10,18,32,0.0) 54%),
+    radial-gradient(860px 680px at 55% 92%, rgba(124,92,255,0.10), rgba(10,18,32,0.0) 56%),
+    linear-gradient(180deg, var(--bgB) 0%, var(--bgA) 48%, #050914 100%);
   background-attachment: fixed;
   color: var(--text);
 }
@@ -71,7 +71,7 @@ input[type="button"] {
   overflow-y: auto;
   padding: 20px 16px 20px 20px;
   border-right: 1px solid rgba(255,255,255,0.08);
-  background: linear-gradient(180deg, rgba(8,14,28,0.84), rgba(8,14,28,0.66));
+  background: linear-gradient(180deg, rgba(8,14,28,0.92), rgba(8,14,28,0.72));
   backdrop-filter: blur(10px);
 }
 
@@ -185,11 +185,11 @@ input[type="button"] {
   align-items: flex-start;
   gap: 16px;
   margin-bottom: 18px;
-  padding: 14px 16px;
+  padding: 16px 18px;
   border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 20px;
-  background: rgba(11,18,32,0.72);
-  box-shadow: 0 16px 40px rgba(0,0,0,0.26);
+  border-radius: 22px;
+  background: rgba(11,18,32,0.78);
+  box-shadow: 0 18px 42px rgba(0,0,0,0.28);
   backdrop-filter: blur(10px);
 }
 
@@ -197,11 +197,20 @@ input[type="button"] {
   min-width: 0;
 }
 
+.eyebrow {
+  margin: 0 0 7px;
+  color: rgba(255,255,255,0.54);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
 .h1 {
   font-size: clamp(1.95rem, 4.2vw, 3rem);
   font-weight: 900;
-  letter-spacing: 0.2px;
-  line-height: 1.06;
+  letter-spacing: -0.02em;
+  line-height: 1.04;
   margin: 0 0 8px;
 }
 
@@ -302,7 +311,7 @@ input[type="button"] {
 .sectionhead {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 12px;
   flex-wrap: wrap;
   margin: 0 0 10px;
@@ -319,7 +328,8 @@ input[type="button"] {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: clamp(0.8rem, 1.4vw, 0.95rem);
-  font-style: italic;
+  font-style: normal;
+  line-height: 1.45;
 }
 
 .divider {
@@ -366,11 +376,11 @@ input[type="button"] {
 
 .card {
   border: 1px solid var(--stroke);
-  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
-  border-radius: clamp(14px, 2vw, 18px);
+  background: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.032));
+  border-radius: clamp(16px, 2vw, 20px);
   padding: clamp(12px, 2vw, 16px);
-  box-shadow: 0 18px 50px rgba(0,0,0,0.40);
-  backdrop-filter: blur(6px);
+  box-shadow: 0 18px 42px rgba(0,0,0,0.34);
+  backdrop-filter: blur(8px);
   min-width: 0;
 }
 
@@ -415,7 +425,8 @@ input[type="button"] {
   margin-top: 4px;
   font-size: clamp(0.82rem, 1.4vw, 0.95rem);
   color: rgba(255,255,255,0.72);
-  font-style: italic;
+  font-style: normal;
+  line-height: 1.45;
 }
 
 .pill {
@@ -425,13 +436,13 @@ input[type="button"] {
   padding: 7px 10px;
   border-radius: 999px;
   border: 1px solid var(--stroke);
-  background: rgba(255,255,255,0.05);
+  background: rgba(255,255,255,0.045);
   font-size: clamp(0.74rem, 1.35vw, 0.88rem);
   white-space: nowrap;
   margin: 0 8px 8px 0;
 }
 
-.pill.neutral { background: rgba(255,255,255,0.045); }
+.pill.neutral { background: rgba(255,255,255,0.038); }
 
 .pill.warn {
   border-color: rgba(251,191,36,0.35);
@@ -474,13 +485,13 @@ input[type="button"] {
 
 .kvbox, .rammeta, .panel {
   border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 14px;
-  background: rgba(0,0,0,0.16);
+  border-radius: 16px;
+  background: rgba(0,0,0,0.14);
   padding: clamp(10px, 1.5vw, 12px);
   min-width: 0;
 }
 
-.panel { min-height: 140px; }
+.panel { min-height: 132px; }
 
 .k {
   font-size: 12px;
@@ -641,10 +652,10 @@ input[type="button"] {
 
 .mapwrap, .invwrap, .advwrap {
   border: 1px solid var(--stroke);
-  background: rgba(255,255,255,0.04);
-  border-radius: clamp(14px, 2vw, 18px);
+  background: rgba(255,255,255,0.035);
+  border-radius: clamp(16px, 2vw, 20px);
   padding: clamp(12px, 2vw, 16px);
-  box-shadow: 0 18px 50px rgba(0,0,0,0.35);
+  box-shadow: 0 18px 42px rgba(0,0,0,0.30);
   margin: 0;
 }
 
@@ -832,7 +843,7 @@ table.inv {
   padding: 4px 9px;
   border-radius: 999px;
   border: 1px solid rgba(255,255,255,0.10);
-  background: rgba(255,255,255,0.04);
+  background: rgba(255,255,255,0.035);
   font-size: 11.5px;
   font-weight: 900;
   letter-spacing: 0.2px;
@@ -863,8 +874,8 @@ table.inv {
 .advmsg {
   margin-top: 4px;
   color: rgba(255,255,255,0.88);
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: 14px;
+  line-height: 1.55;
 }
 
 .advright {
@@ -945,10 +956,10 @@ table.inv {
 
 .stat {
   border: 1px solid rgba(255,255,255,0.10);
-  background: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.035));
-  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.065), rgba(255,255,255,0.03));
+  border-radius: 18px;
   padding: clamp(12px, 2vw, 16px);
-  box-shadow: 0 14px 40px rgba(0,0,0,0.25);
+  box-shadow: 0 14px 34px rgba(0,0,0,0.22);
 }
 
 .statk {
@@ -1009,8 +1020,8 @@ table.inv {
 
 .subcard {
   border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 14px;
-  background: rgba(255,255,255,0.03);
+  border-radius: 16px;
+  background: rgba(255,255,255,0.028);
   padding: 12px;
   min-width: 0;
 }
@@ -1395,6 +1406,16 @@ def _badge_text(sev: str, label: str) -> str:
     cls = sev if sev in ("ok", "warn", "bad", "stale") else "ok"
     return f'<span class="badgetxt {cls}">{_html_escape(label)}</span>'
 
+def _page_eyebrow(active_page: str) -> str:
+    page = (active_page or "").strip().lower()
+    return {
+        "fleet": "Fleet overview",
+        "inventory": "Hardware inventory",
+        "diagnostics": "Diagnostics",
+        "downloads": "Installers and setup",
+        "node": "Node detail",
+    }.get(page, "Harry")
+
 def page_html(title: str, body: str, extra_js: str = "") -> str:
     script = f"<script>{extra_js}</script>" if extra_js else ""
     return f"""<!doctype html>
@@ -1480,20 +1501,21 @@ def render_shell(
     extra_js: str = "",
     sidebar_footer: str = "",
 ) -> str:
+    eyebrow = _page_eyebrow(active_page)
     body = f"""
 <div class="shell">
   <aside class="sidebar">
     <div class="sidebar-inner">
       <div class="brand">
         <div class="brand-title">HARRY</div>
-        <div class="brand-sub">HARdware Review buddY</div>
+        <div class="brand-sub">Hardware review buddy</div>
       </div>
 
       {_render_sidebar(sidebar_sections, active_page=active_page)}
 
       <div class="sidebar-meta">
         Quiet infrastructure.<br/>
-        Boring is good.
+        Clear signals.
         {f'<div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08);">{sidebar_footer}</div>' if sidebar_footer else ''}
       </div>
     </div>
@@ -1503,6 +1525,7 @@ def render_shell(
     <div class="main-inner">
       <div class="topbar">
         <div class="topbar-left">
+          <div class="eyebrow">{_html_escape(eyebrow)}</div>
           <div class="h1">{_html_escape(page_title)}</div>
           <div class="sub">{page_subtitle}</div>
         </div>

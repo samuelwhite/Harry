@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 import app.main as main
 import importlib
+from app.ui.templates import render_shell
 
 router = importlib.import_module("app.ui.router")
 
@@ -68,3 +69,18 @@ def test_node_summary_strips_platform_suffix_from_agent_version():
     summary = main._node_summary(payload, ctx={})
 
     assert summary["agent_version"] == "0.2.3"
+
+
+def test_render_shell_includes_page_eyebrow():
+    html = render_shell(
+        title="HARRY Fleet",
+        active_page="fleet",
+        page_title="Fleet",
+        page_subtitle="Live status",
+        sidebar_sections=[],
+        actions=[],
+        content="",
+    )
+
+    assert "Fleet overview" in html
+    assert '<div class="eyebrow">Fleet overview</div>' in html
