@@ -1506,6 +1506,47 @@ def _render_hidden_nodes(hidden_nodes: List[NodeView], hours: int) -> str:
 """
 
 
+def _render_single_node_overview(nv: NodeView, hours: int) -> str:
+    setup_href = f"/downloads#downloads-instructions"
+    return f"""
+<div class="section" id="single-node-overview">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">Harry is watching this machine.</div>
+      <div class="h2sub">This is the Brain node. Add another agent to turn this into a cluster view.</div>
+    </div>
+    <div class="pill">{_html_escape(_ago(nv.ts))}</div>
+  </div>
+
+  <div class="card">
+    <div class="advwrap">
+      <div class="advrow">
+        <div class="advleft">
+          <div class="advnode">{_html_escape(_display_node_name(nv.node))}</div>
+          <div class="advmsg">Machine identity: {_html_escape(nv.model or nv.cpu or 'unknown hardware')}</div>
+        </div>
+      </div>
+      <div class="advrow">
+        <div class="advleft">
+          <div class="advnode">{_html_escape(nv.headline)}</div>
+          <div class="advmsg">Health: {_html_escape(nv.health_state)} · Last heartbeat {_html_escape(_ago(nv.ts))}</div>
+        </div>
+      </div>
+      <div class="advrow">
+        <div class="advleft">
+          <div class="advnode">Add another agent</div>
+          <div class="advmsg">Use the Brain address on the downloads page to expand this into a fleet.</div>
+        </div>
+        <div class="advright">
+          <a class="btn" href="{setup_href}">Open downloads</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+"""
+
+
 def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
     display_name = _display_node_name(nv.node)
     dot = _sev_dot(nv.worst)
@@ -1697,6 +1738,21 @@ def render_fleet_live(hours: int, debug: bool) -> str:
     trends_html = _render_fleet_trends(nodeviews, hours=hours)
     hidden_html = _render_hidden_nodes(hidden_nodeviews, hours=hours)
 
+    if len(nodeviews) == 1:
+        primary = nodeviews[0]
+        return f"""
+<div id="fleet-live" data-node-count="{len(nodeviews)}">
+  {_render_top_banner(nodeviews)}
+  {_fleet_outlier_pills(nodeviews)}
+  {_render_single_node_overview(primary, hours=hours)}
+  <div class="divider"></div>
+  {_render_node_card(primary, hours=hours, debug=debug)}
+  <div class="divider"></div>
+  {_render_fleet_trends([primary], hours=hours)}
+  {hidden_html}
+</div>
+"""
+
     fleet_map_html = f"""
 <div class="section" id="fleet-overview">
   <div class="sectionhead">
@@ -1717,8 +1773,7 @@ def render_fleet_live(hours: int, debug: bool) -> str:
 </div>
 """
 
-    if nodeviews:
-        table_html = f"""
+    table_html = f"""
 <div class="section" id="fleet-table">
   <div class="sectionhead">
     <div>
@@ -1730,9 +1785,7 @@ def render_fleet_live(hours: int, debug: bool) -> str:
     {_render_inventory_table(nodeviews, hours=hours)}
   </div>
 </div>
-"""
-    else:
-        table_html = """
+""" if nodeviews else """
 <div class="section" id="fleet-table">
   <div class="sectionhead">
     <div>
