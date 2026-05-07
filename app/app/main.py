@@ -17,6 +17,7 @@ from app.config import DATA_DIR, DB_PATH
 from app.harry_normalise import normalise_for_schema
 from app.harry_schema import validate_harry_snapshot
 from app.health import compute_health
+from app.service_awareness import build_service_rows
 from app.ui.db import (
     STALE_SECONDS,
     get_latest_node_record,
@@ -523,6 +524,16 @@ def api_root():
         "schema_current": SCHEMA_CURRENT,
         "dist_ok": DIST_OK,
         "dist_error": DIST_ERROR,
+    }
+
+
+@app.get("/api/services", response_model=None)
+def api_services():
+    rows = build_service_rows()
+    return {
+        "ok": True,
+        "count": len(rows),
+        "services": rows,
     }
 
 
