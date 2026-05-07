@@ -633,7 +633,7 @@ def download_file(filename: str) -> FileResponse:
     base = _downloads_dir().resolve()
     path = (base / filename).resolve()
 
-    if not str(path).startswith(str(base)):
+    if not path.is_relative_to(base):
         raise HTTPException(status_code=404, detail="File not found")
 
     if not path.exists() or not path.is_file():

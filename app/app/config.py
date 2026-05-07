@@ -18,4 +18,4 @@ def _default_data_dir() -> Path:
 
 
 DATA_DIR = _default_data_dir()
-DB_PATH = Path(os.environ.get("HARRY_DB", str(DATA_DIR / "harry.db")))
+DB_PATH = Path(os.environ.get("HARRY_DB_PATH", str(DATA_DIR / "harry.db")))
