@@ -36,6 +36,7 @@ from app.ui.templates import (
     render_shell,
 )
 from app.ui.capabilities import gpu_state_message
+from app.ui.copy import status_copy
 
 try:
     from app.advice_engine import build_advice_and_health as advice_build
@@ -833,11 +834,17 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
         worst = _worst_severity([a for a in advice if str(a.get("severity")).lower() in ("warn", "bad")])
 
     if stale:
-        headline = "Node appears stale."
+        headline = status_copy(stale=True)
     elif delayed:
-        headline = "Node reporting looks delayed."
+        headline = status_copy(delayed=True)
     else:
-        headline = _headline_line("bad" if worst == "bad" else ("warn" if worst == "warn" else "ok"))
+        headline = status_copy(
+            health_state=health_state,
+            cpu_pressure_now=cpu_pressure_now,
+            disk_used_pct=disk_used_pct,
+            gpus=gpus,
+            capabilities=capabilities,
+        )
 
     debug: Dict[str, Any] = {}
     try:
