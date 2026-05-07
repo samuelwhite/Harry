@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 
 from fastapi import HTTPException
 
+from app.machine_summary import get_machine_summary
 from app.versions import AGENT_VERSION, BRAIN_VERSION
 
 from .db import get_latest_node_record, _load_schema_current, _raw_payload
@@ -75,9 +76,27 @@ def render_node_detail(node: str, hours: int) -> str:
         payload = {"bad_payload": True, "raw": row["payload"]}
 
     raw = _raw_payload(payload)
+    summary = get_machine_summary(payload)
 
     pretty_payload = _html_escape(json.dumps(payload, indent=2, ensure_ascii=False))
     pretty_raw = _html_escape(json.dumps(raw, indent=2, ensure_ascii=False)) if raw else "—"
+    summary_html = ""
+    if summary and summary.get("summary"):
+        summary_html = f"""
+<div class="section" id="machine-summary">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">Machine summary</div>
+      <div class="h2sub">Optional local summary, cached for quick viewing.</div>
+    </div>
+    <div class="pill">{_html_escape(str(summary.get("source") or "local"))}</div>
+  </div>
+
+  <div class="panel">
+    <div class="subtitle" style="margin:0;">{_html_escape(str(summary.get("summary") or ""))}</div>
+  </div>
+</div>
+"""
 
     schema_current = _load_schema_current()
     sidebar_footer = (
@@ -92,6 +111,8 @@ def render_node_detail(node: str, hours: int) -> str:
     )
 
     content = f"""
+{summary_html}
+
 <div class="section" id="normalised-payload">
   <div class="sectionhead">
     <div>
