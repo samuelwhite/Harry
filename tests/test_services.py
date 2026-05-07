@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 import app.config as config
 import app.main as main
 from app import service_awareness as sa
+from app.ui import fleet as fleet_ui
 from app.ui import db as dbmod
 
 
@@ -107,12 +108,15 @@ def test_build_service_rows_uses_config_and_node_health(monkeypatch, tmp_path):
     rows = sa.build_service_rows()
     jellyfin = next(row for row in rows if row["name"] == "Jellyfin")
     brain = next(row for row in rows if row["name"] == "Harry Brain")
+    html = fleet_ui.render_fleet_live(hours=72, debug=False)
 
     assert jellyfin["status"] == "online"
     assert jellyfin["health"] == "online"
     assert jellyfin["tags"] == ["media", "video"]
     assert jellyfin["last_checked"] == now.strftime("%Y-%m-%dT%H:%M:%SZ")
     assert brain["status"] == "online"
+    assert "Household services" in html
+    assert "Jellyfin" in html
 
 
 def test_api_services_returns_service_rows(monkeypatch, tmp_path):

@@ -10,6 +10,7 @@ from urllib.parse import quote
 from app.health import compute_health
 from app.rules import evaluate as rules_evaluate
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
+from app.service_awareness import build_service_rows
 from app.ui.db import (
     STALE_SECONDS,
     _db,
@@ -226,6 +227,102 @@ def _render_activity_section(events: List[Dict[str, Any]], loading: bool = False
       {body}
     </div>
   </div>
+</div>
+"""
+
+
+def _service_status_class(status: str) -> str:
+    sev = (status or "unknown").strip().lower()
+    if sev == "online":
+        return "ok"
+    if sev == "degraded":
+        return "warn"
+    if sev == "offline":
+        return "bad"
+    return "info"
+
+
+def _service_status_label(status: str) -> str:
+    sev = (status or "unknown").strip().lower()
+    if sev == "online":
+        return "Online"
+    if sev == "degraded":
+        return "Degraded"
+    if sev == "offline":
+        return "Offline"
+    return "Unknown"
+
+
+def _render_services_section() -> str:
+    try:
+        rows = build_service_rows()
+    except Exception:
+        rows = []
+
+    if not rows:
+        body = '<div class="activitystate">No configured services yet. Add a services.json file or HARRY_SERVICES_JSON to start tracking household services.</div>'
+    else:
+        cards: List[str] = []
+        for row in rows:
+            name = _html_escape(_safe_str(row.get("name") or "Service"))
+            role = _html_escape(_safe_str(row.get("role") or row.get("type") or ""))
+            node = _html_escape(_safe_str(row.get("node") or "—"))
+            status = _safe_str(row.get("status") or "unknown")
+            status_class = _service_status_class(status)
+            status_label = _service_status_label(status)
+            last_checked = _parse_ts(_safe_str(row.get("last_checked") or ""))
+            last_checked_txt = _ago(last_checked)
+            message = _html_escape(_safe_str(row.get("message") or ""))
+            url = _safe_str(row.get("url") or "")
+            link_html = (
+                f'<a class="servicelink" href="{_html_escape(url)}" target="_blank" rel="noopener noreferrer">{_html_escape(url)}</a>'
+                if url
+                else "<span class='muted'>—</span>"
+            )
+
+            cards.append(
+                f"""
+<div class="card">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">{name}</div>
+      <div class="h2sub">{role or _html_escape(_safe_str(row.get("type") or "manual"))}</div>
+    </div>
+    <span class="badgetxt {status_class}">{_html_escape(status_label)}</span>
+  </div>
+
+  <div class="kvgrid">
+    <div class="kv">
+      <div class="k">Node</div>
+      <div class="v">{node}</div>
+    </div>
+    <div class="kv">
+      <div class="k">Last checked</div>
+      <div class="v">{_html_escape(last_checked_txt)}</div>
+    </div>
+    <div class="kv">
+      <div class="k">Link</div>
+      <div class="v">{link_html}</div>
+    </div>
+  </div>
+
+  <div class="subtitle">{message or "Derived from node telemetry and service configuration."}</div>
+</div>
+"""
+            )
+
+        body = f'<div class="cardgrid">{"".join(cards)}</div>'
+
+    return f"""
+<div class="section" id="services-overview">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">Household services</div>
+      <div class="h2sub">A small service-aware layer built from node telemetry and simple configuration.</div>
+    </div>
+  </div>
+
+  {body}
 </div>
 """
 
@@ -1854,6 +1951,8 @@ def render_fleet_live(hours: int, debug: bool) -> str:
   <div class="divider"></div>
   {activity_html}
   <div class="divider"></div>
+  {_render_services_section()}
+  <div class="divider"></div>
   {_render_fleet_trends([primary], hours=hours)}
   {hidden_html}
 </div>
@@ -1912,6 +2011,8 @@ def render_fleet_live(hours: int, debug: bool) -> str:
   {fleet_stats_html}
   <div class="divider"></div>
   {activity_html}
+  <div class="divider"></div>
+  {_render_services_section()}
   <div class="divider"></div>
   {fleet_map_html}
   <div class="divider"></div>
