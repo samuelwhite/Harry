@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from app.config import DATA_DIR
 from app.health import compute_health
-from app.ui.db import STALE_SECONDS, get_latest_node_records, _parse_ts, _safe_str
+from app.db_helpers import STALE_SECONDS, get_latest_node_records, _parse_ts, _safe_str
 
 
 def _safe_dict(value: Any) -> Dict[str, Any]:
