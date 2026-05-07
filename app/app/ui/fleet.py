@@ -308,6 +308,98 @@ def _render_services_section() -> str:
 """
 
 
+def _capability_yes_no(value: Any) -> str:
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return "unknown"
+
+
+def _gpu_reasoning_text(nv: NodeView) -> str:
+    if nv.gpus:
+        names = [str(g.get("name") or "GPU").strip() for g in nv.gpus if isinstance(g, dict)]
+        names = [name for name in names if name]
+        count = len(nv.gpus)
+        suffix = f" ({', '.join(names[:2])})" if names else ""
+        plural = "s" if count != 1 else ""
+        return f"{count} GPU{plural} detected{suffix}."
+
+    gpu_cap = nv.capabilities.get("gpu")
+    if gpu_cap is False:
+        return "GPU reporting unsupported by this agent."
+    if gpu_cap is True:
+        return "No GPU detected."
+    return "GPU data unavailable."
+
+
+def _render_reasoning_details(nv: NodeView, *, label: str = "Why Harry says this", open_details: bool = False) -> str:
+    cpu_bits: List[str] = []
+    if nv.cpu_pressure_now is not None:
+        cpu_bits.append(f"{nv.cpu_pressure_now:.1f}% pressure")
+    elif nv.load1 is not None:
+        cpu_bits.append(f"load {nv.load1:.2f}")
+    if nv.cpu_pressure_band:
+        cpu_bits.append(str(nv.cpu_pressure_band))
+    cpu_text = " · ".join(cpu_bits) if cpu_bits else "—"
+
+    memory_text = "—" if nv.ram_used_pct is None else f"{nv.ram_used_pct:.1f}% used"
+    disk_text = "—" if nv.disk_used_pct is None else f"{nv.disk_used_pct:.1f}% used"
+    gpu_text = _gpu_reasoning_text(nv)
+    heartbeat_text = _ago(nv.ts)
+    agent_text = display_agent_version(nv.agent_version) or "unknown"
+    caps = [
+        f"gpu {_capability_yes_no(nv.capabilities.get('gpu'))}",
+        f"docker {_capability_yes_no(nv.capabilities.get('docker'))}",
+        f"systemd {_capability_yes_no(nv.capabilities.get('systemd'))}",
+        f"temperature {_capability_yes_no(nv.capabilities.get('temperature'))}",
+        f"smart {_capability_yes_no(nv.capabilities.get('smart'))}",
+    ]
+    caps_text = " · ".join(caps)
+    open_attr = " open" if open_details else ""
+
+    return f"""
+<details class="details reasoning"{open_attr}>
+  <summary>{_html_escape(label)} <span class="detailsmuted">CPU · memory · disk · GPU · heartbeat · agent · capabilities</span></summary>
+
+  <div class="panel">
+    <div class="subtitle" style="margin:0 0 12px 0;">{_html_escape(nv.headline)}</div>
+
+    <div class="kvgrid">
+      <div class="kv">
+        <div class="k">CPU</div>
+        <div class="v">{_html_escape(cpu_text)}</div>
+      </div>
+      <div class="kv">
+        <div class="k">Memory</div>
+        <div class="v">{_html_escape(memory_text)}</div>
+      </div>
+      <div class="kv">
+        <div class="k">Disk</div>
+        <div class="v">{_html_escape(disk_text)}</div>
+      </div>
+      <div class="kv">
+        <div class="k">GPU</div>
+        <div class="v">{_html_escape(gpu_text)}</div>
+      </div>
+      <div class="kv">
+        <div class="k">Last heartbeat</div>
+        <div class="v">{_html_escape(heartbeat_text)}</div>
+      </div>
+      <div class="kv">
+        <div class="k">Agent</div>
+        <div class="v">{_html_escape(agent_text)}</div>
+      </div>
+      <div class="kv">
+        <div class="k">Capabilities</div>
+        <div class="v">{_html_escape(caps_text)}</div>
+      </div>
+    </div>
+  </div>
+</details>
+"""
+
+
 def _bios_display(facts: Dict[str, Any], raw_facts: Dict[str, Any]) -> str:
     for src in (facts, raw_facts):
         if src.get("bios_version"):
@@ -1711,6 +1803,7 @@ def _render_single_node_overview(nv: NodeView, hours: int) -> str:
           <div class="advmsg">Health: {_html_escape(nv.health_state)} · Last heartbeat {_html_escape(_ago(nv.ts))}</div>
         </div>
       </div>
+      {_render_reasoning_details(nv, open_details=True)}
       <div class="advrow">
         <div class="advleft">
           <div class="advnode">Add another agent</div>
@@ -1813,6 +1906,8 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
       {''.join(pills)}
     </div>
   </div>
+
+  {_render_reasoning_details(nv)}
 
   <div class="row row2">
     <div class="kvbox">
