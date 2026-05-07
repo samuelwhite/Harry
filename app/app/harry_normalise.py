@@ -276,8 +276,8 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
                 metrics_ext["temps_c_raw"] = temps_in
 
     gpu_in = metrics_in.get("gpu")
-    if not isinstance(gpu_in, list):
-        gpu_in = []
+    if not isinstance(gpu_in, list) or not gpu_in:
+        gpu_in = _safe_list(facts_in.get("gpus"))
 
     gpu_out: List[Dict[str, Any]] = []
     gpu_raw: List[Dict[str, Any]] = []
@@ -290,6 +290,18 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
         name = g.get("name") or g.get("model") or "GPU"
         util_pct = _clamp(_num(g.get("util_pct")))
         temp_c = _num(g.get("temp_c"))
+        mem_total_mb = _num(g.get("mem_total_mb"))
+        if mem_total_mb is None:
+            mem_total_mb = _num(g.get("vram_mb"))
+        if mem_total_mb is None:
+            mem_total_mb = _num(g.get("adapter_ram"))
+        if mem_total_mb is None:
+            mem_total_mb = _num(g.get("adapter_ram_mb"))
+        mem_used_mb = _num(g.get("mem_used_mb"))
+        if mem_used_mb is None:
+            mem_used_mb = _num(g.get("vram_used_mb"))
+        driver = g.get("driver") or g.get("driver_version")
+        bus_id = g.get("bus_id") or g.get("pci_bus_id") or g.get("pnp_device_id")
 
         if is_021:
             item: Dict[str, Any] = {"name": name}
@@ -299,8 +311,6 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
                 item["temp_c"] = temp_c
             gpu_out.append(item)
         else:
-            mem_total_mb = _num(g.get("mem_total_mb"))
-            mem_used_mb = _num(g.get("mem_used_mb"))
             mem_used_pct = _clamp(_num(g.get("mem_used_pct")))
 
             if mem_used_pct is None and mem_total_mb and mem_total_mb > 0 and mem_used_mb is not None:
@@ -317,10 +327,18 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
                 item["mem_used_mb"] = mem_used_mb
             if mem_used_pct is not None:
                 item["mem_used_pct"] = mem_used_pct
-            if g.get("driver") is not None:
-                item["driver"] = str(g.get("driver"))
-            if g.get("bus_id") is not None:
-                item["bus_id"] = str(g.get("bus_id"))
+            if driver is not None:
+                item["driver"] = str(driver)
+            if bus_id is not None:
+                item["bus_id"] = str(bus_id)
+            if g.get("video_processor") is not None:
+                item["video_processor"] = str(g.get("video_processor"))
+            if g.get("status") is not None:
+                item["status"] = str(g.get("status"))
+            if g.get("integrated") is not None:
+                item["integrated"] = bool(g.get("integrated"))
+            if g.get("pnp_device_id") is not None:
+                item["pnp_device_id"] = str(g.get("pnp_device_id"))
 
             gpu_out.append(item)
 

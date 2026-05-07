@@ -92,6 +92,10 @@ def _get_gpu_list(metrics: Dict[str, Any], raw: Dict[str, Any]) -> List[Dict[str
         v = raw_metrics.get(k)
         if isinstance(v, list) and v:
             return [x for x in v if x and isinstance(x, dict)]
+    raw_facts = raw.get("facts") if isinstance(raw.get("facts"), dict) else {}
+    v = raw_facts.get("gpus")
+    if isinstance(v, list) and v:
+        return [x for x in v if x and isinstance(x, dict)]
 
     return []
 

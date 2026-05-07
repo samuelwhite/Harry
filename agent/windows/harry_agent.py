@@ -287,7 +287,7 @@ $items | ConvertTo-Json -Compress
 def get_gpus() -> list[dict]:
     ps = r"""
 $items = Get-CimInstance Win32_VideoController |
-  Select-Object Name, AdapterRAM, DriverVersion, VideoProcessor, PNPDeviceID |
+  Select-Object Name, AdapterRAM, DriverVersion, VideoProcessor, PNPDeviceID, Status |
   Where-Object { $_.Name -and $_.Name.Trim() -ne "" }
 
 $items | ConvertTo-Json -Compress
@@ -307,7 +307,10 @@ $items | ConvertTo-Json -Compress
         if not name:
             continue
 
-        key = name.lower()
+        pnp = (g.get("PNPDeviceID") or "").strip()
+        key = f"{name.lower()}::{pnp.lower()}"
+        if key == "::":
+            key = name.lower()
         if key in seen:
             continue
         seen.add(key)
@@ -319,21 +322,25 @@ $items | ConvertTo-Json -Compress
         except Exception:
             pass
 
-        pnp = (g.get("PNPDeviceID") or "").upper()
+        pnp_upper = pnp.upper()
         integrated = False
 
         lower_name = name.lower()
         if "vega" in lower_name or "radeon(tm)" in lower_name:
             integrated = True
-        if "PCI\\VEN_" in pnp:
+        if "PCI\\VEN_" in pnp_upper:
             integrated = False if "NVIDIA" in name.upper() or "GEFORCE" in name.upper() else integrated
 
         gpus.append(
             {
                 "name": name,
                 "vram_mb": vram_mb,
+                "mem_total_mb": vram_mb,
                 "driver": g.get("DriverVersion"),
+                "driver_version": g.get("DriverVersion"),
                 "video_processor": g.get("VideoProcessor"),
+                "status": g.get("Status"),
+                "pnp_device_id": g.get("PNPDeviceID"),
                 "integrated": integrated,
             }
         )
@@ -391,7 +398,7 @@ def build_payload() -> dict:
                 }
             ],
             "temps_c": {},
-            "gpu": [],
+            "gpu": gpus,
             "extensions": {},
         },
         "derived": {
