@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
-from app.versions import AGENT_VERSION, BRAIN_VERSION
+from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
 
 from .db import (
     _db,
@@ -109,7 +109,7 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
     model = raw_facts.get("model") or facts.get("model")
     cpu = raw_facts.get("cpu") or facts.get("cpu")
     bios = _bios_display(facts, raw_facts)
-    agent_version = payload.get("agent_version") or "unknown"
+    agent_version = display_agent_version(payload.get("agent_version") or "unknown")
 
     ram_total_gb = raw_facts.get("ram_total_gb") or facts.get("ram_total_gb")
     ram_max_gb = raw_facts.get("ram_max_gb") or facts.get("ram_max_gb")
@@ -292,7 +292,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
         ram = _fmt_ram(r)
         bios = r.get("bios_version") or "—"
         last_seen = r.get("last_seen") or "—"
-        agent = r.get("agent_version") or "unknown"
+        agent = display_agent_version(r.get("agent_version") or "unknown")
         disks = r.get("disks") or []
         gpus = r.get("gpus") or []
 

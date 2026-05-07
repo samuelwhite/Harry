@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import re
+
 # app/versions.py
 
 # -----------------------------------------------------------------------------
@@ -34,3 +38,18 @@ AGENT_VERSION = "0.2.3"
 # -----------------------------------------------------------------------------
 SCHEMA_BEHIND_WARN_MIN = 15
 SCHEMA_BEHIND_CRIT_MIN = 60
+
+
+_AGENT_VERSION_RE = re.compile(r"^\s*(\d+\.\d+\.\d+)(?:[-+].*)?\s*$")
+
+
+def display_agent_version(version: str | None) -> str:
+    raw = (version or "").strip()
+    if not raw or raw == "unknown":
+        return "unknown"
+
+    match = _AGENT_VERSION_RE.match(raw)
+    if match:
+        return match.group(1)
+
+    return raw

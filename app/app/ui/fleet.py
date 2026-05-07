@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 from app.health import compute_health
 from app.rules import evaluate as rules_evaluate
-from app.versions import AGENT_VERSION, BRAIN_VERSION
+from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
 from app.ui.db import (
     STALE_SECONDS,
     _db,
@@ -673,8 +673,8 @@ def _trend_block(label: str, svg: str, empty_text: Optional[str] = None) -> str:
 
 
 def _agent_version_state(actual: str, expected: str) -> str:
-    a = (actual or "").strip()
-    e = (expected or "").strip()
+    a = display_agent_version(actual)
+    e = display_agent_version(expected)
     if not a or a == "unknown":
         return "unknown"
     if not e or e == "unknown":
@@ -777,7 +777,7 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
     model = _safe_str(raw_facts.get("model") or facts.get("model") or "")
     cpu = _safe_str(raw_facts.get("cpu") or facts.get("cpu") or "")
     bios = _bios_display(facts, raw_facts)
-    agent_version = _safe_str(payload.get("agent_version") or "unknown")
+    agent_version = display_agent_version(_safe_str(payload.get("agent_version") or "unknown"))
 
     ram_total = _ram_total_display(facts, raw_facts)
     ram_used_pct = _get_ram_used_pct(metrics, raw_metrics)
@@ -1175,7 +1175,7 @@ def _render_fleet_map(nodeviews: List[NodeView], brain_name: str) -> str:
         meta = _ago(nv.ts)
 
         agent_state = _agent_version_state(nv.agent_version, AGENT_VERSION)
-        agent_line = f"Agent {nv.agent_version or 'unknown'}"
+        agent_line = f"Agent {display_agent_version(nv.agent_version)}"
         if agent_state == "behind":
             agent_line += " · behind"
 
@@ -1574,7 +1574,7 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
         <span class="model">{_html_escape(model)}</span>
       </div>
       <div class="nodever {agent_state}">
-        Agent {_html_escape(nv.agent_version or 'unknown')}{' · behind' if agent_state == 'behind' else ''}
+        Agent {_html_escape(display_agent_version(nv.agent_version))}{' · behind' if agent_state == 'behind' else ''}
       </div>
       <div class="subtitle">{_html_escape(nv.headline)}</div>
       {top_action_line}

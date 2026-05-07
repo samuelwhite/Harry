@@ -2,6 +2,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.versions import display_agent_version
+
 
 def _num(x: Any) -> Optional[float]:
     try:
@@ -178,7 +180,7 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
 
     node = (payload.get("node") or _safe_dict(payload.get("facts")).get("hostname") or "unknown")
     ts = payload.get("ts") or _iso_utc_now()
-    agent_version = str(payload.get("agent_version") or "unknown")
+    agent_version = display_agent_version(str(payload.get("agent_version") or "unknown"))
     agent_status = payload.get("agent_status") if isinstance(payload.get("agent_status"), dict) else {}
 
     facts_in = _safe_dict(payload.get("facts"))

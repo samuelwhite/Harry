@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from app.versions import AGENT_VERSION, BRAIN_VERSION
+from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
 from app.ui.db import _load_schema_current
 from app.ui.fleet import build_nodeviews, _render_advice_queue
 from app.ui.templates import _html_escape, render_shell
@@ -71,7 +71,7 @@ def render_diagnostics_page(hours: int, debug: bool) -> str:
     behind = sum(
         1
         for n in nodeviews
-        if n.agent_version not in ("", "unknown") and n.agent_version != AGENT_VERSION
+        if display_agent_version(n.agent_version) not in ("", "unknown") and display_agent_version(n.agent_version) != AGENT_VERSION
     )
 
     delayed = sum(

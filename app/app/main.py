@@ -20,6 +20,7 @@ from app.health import compute_health
 from app.versions import (
     BRAIN_VERSION,
     AGENT_VERSION,
+    display_agent_version,
     SCHEMA_BEHIND_WARN_MIN,
     SCHEMA_BEHIND_CRIT_MIN,
 )
@@ -126,6 +127,8 @@ def _validate_dist_agent(path: Path) -> Tuple[bool, str | None]:
         raw = path.read_text(encoding="utf-8", errors="replace")
         if "\t" in raw:
             return False, "contains_tab_characters"
+        if sys.platform.startswith("win"):
+            return True, None
         r = subprocess.run(["bash", "-n", str(path)], capture_output=True, text=True)
         if r.returncode != 0:
             err = (r.stderr or r.stdout or "").strip()
@@ -427,7 +430,7 @@ def _node_summary(payload: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any
     return {
         "node": payload.get("node", "unknown"),
         "last_seen": payload.get("ts", "unknown"),
-        "agent_version": payload.get("agent_version") or "unknown",
+        "agent_version": display_agent_version(payload.get("agent_version") or "unknown"),
         "schema_version": payload.get("schema_version") or payload.get("schema") or "unknown",
         "agent_status": _agent_status_view(payload),
         "health": h.get("state", "unknown"),
