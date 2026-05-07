@@ -821,6 +821,13 @@ if which("sensors"):
 
 facts_gpus = []
 gpus = []
+capabilities = {
+    "gpu": bool(which("nvidia-smi") or which("lspci")),
+    "docker": which("docker") is not None,
+    "systemd": bool(which("systemctl") or os.path.exists("/run/systemd/system")),
+    "temperature": which("sensors") is not None,
+    "smart": which("smartctl") is not None,
+}
 
 if which("nvidia-smi"):
     out = run([
@@ -898,6 +905,7 @@ payload = {
   "node": node,
   "ts": ts,
   "agent_status": agent_status,
+  "capabilities": capabilities,
   "facts": {
     "hostname": hostname,
     "model": model,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
+from app.ui.capabilities import gpu_state_message
 
 from .db import (
     _db,
@@ -114,6 +115,7 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
     cpu = raw_facts.get("cpu") or facts.get("cpu")
     bios = _bios_display(facts, raw_facts)
     agent_version = display_agent_version(payload.get("agent_version") or "unknown")
+    capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), dict) else {}
 
     ram_total_gb = raw_facts.get("ram_total_gb") or facts.get("ram_total_gb")
     ram_max_gb = raw_facts.get("ram_max_gb") or facts.get("ram_max_gb")
@@ -153,6 +155,7 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
         "ram_type": ram_type,
         "disks": clean_list(disks, ["name", "type", "size_gb", "model", "serial"]),
         "gpus": clean_list(gpus, ["name", "driver", "bus_id", "mem_total_mb"]),
+        "capabilities": capabilities,
     }
 
 
@@ -255,9 +258,9 @@ def _fmt_disk_brief(disks: List[Dict[str, Any]]) -> str:
     return "<br>".join(bits)
 
 
-def _fmt_gpu_brief(gpus: List[Dict[str, Any]]) -> str:
+def _fmt_gpu_brief(gpus: List[Dict[str, Any]], capabilities: Dict[str, Any]) -> str:
     if not gpus:
-        return "—"
+        return gpu_state_message(capabilities, gpus)
 
     bits: List[str] = []
     for g in gpus[:2]:
@@ -299,6 +302,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
         agent = display_agent_version(r.get("agent_version") or "unknown")
         disks = r.get("disks") or []
         gpus = r.get("gpus") or []
+        capabilities = r.get("capabilities") or {}
 
         table_rows.append(
             f"""
@@ -341,7 +345,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
     </div>
     <div class="subcard">
       <div class="subcardtitle">Graphics</div>
-      <div class="subcardbody">{_fmt_gpu_brief(gpus)}</div>
+      <div class="subcardbody">{_fmt_gpu_brief(gpus, capabilities)}</div>
     </div>
   </div>
 </div>

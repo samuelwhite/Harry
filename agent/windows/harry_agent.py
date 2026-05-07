@@ -370,6 +370,13 @@ def build_payload() -> dict:
             "last_success_at": now,
             "last_error_at": None,
         },
+        "capabilities": {
+            "gpu": True,
+            "docker": False,
+            "systemd": False,
+            "temperature": False,
+            "smart": False,
+        },
         "facts": {
             "hostname": hostname,
             "model": get_model(),

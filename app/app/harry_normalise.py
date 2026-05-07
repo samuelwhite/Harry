@@ -182,6 +182,7 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
     ts = payload.get("ts") or _iso_utc_now()
     agent_version = display_agent_version(str(payload.get("agent_version") or "unknown"))
     agent_status = payload.get("agent_status") if isinstance(payload.get("agent_status"), dict) else {}
+    capabilities = _safe_dict(payload.get("capabilities"))
 
     facts_in = _safe_dict(payload.get("facts"))
     metrics_in = _safe_dict(payload.get("metrics"))
@@ -372,6 +373,7 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
         "metrics": metrics_out,
         "derived": derived_in,
         "advice": advice_in,
+        "capabilities": capabilities,
     }
 
 

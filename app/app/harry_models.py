@@ -56,6 +56,7 @@ class HarrySnapshot(BaseModel):
     schema_version: str
     agent_version: Optional[str] = None
     agent_status: Dict[str, Any] = Field(default_factory=dict)
+    capabilities: Dict[str, Any] = Field(default_factory=dict)
     node: str
     ts: str
     facts: Facts = Field(default_factory=Facts)

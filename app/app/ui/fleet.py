@@ -35,6 +35,7 @@ from app.ui.templates import (
     _sev_dot,
     render_shell,
 )
+from app.ui.capabilities import gpu_state_message
 
 try:
     from app.advice_engine import build_advice_and_health as advice_build
@@ -710,6 +711,7 @@ class NodeView:
     bios: str
     agent_version: str
     ram_total: str
+    capabilities: Dict[str, Any]
     logical_cores: Optional[int]
     ram_used_pct: Optional[float]
     load1: Optional[float]
@@ -757,6 +759,7 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
 
     facts = _get_facts(payload)
     metrics = _get_metrics(payload)
+    capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), dict) else {}
 
     raw_facts = raw.get("facts") if isinstance(raw.get("facts"), dict) else {}
     raw_metrics = raw.get("metrics") if isinstance(raw.get("metrics"), dict) else {}
@@ -871,6 +874,7 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
         bios=bios,
         agent_version=agent_version,
         ram_total=ram_total,
+        capabilities=capabilities,
         logical_cores=logical_cores,
         ram_used_pct=ram_used_pct,
         load1=load1,
@@ -927,9 +931,9 @@ def _top_action(nv: NodeView) -> Optional[Tuple[str, str]]:
     return None
 
 
-def _render_gpus(gpus: List[Dict[str, Any]]) -> str:
+def _render_gpus(gpus: List[Dict[str, Any]], capabilities: Dict[str, Any]) -> str:
     if not gpus:
-        return "<div class='muted'>None detected.</div>"
+        return f"<div class='muted'>{_html_escape(gpu_state_message(capabilities, gpus))}</div>"
 
     out: List[str] = []
     for g in gpus[:4]:
@@ -1621,7 +1625,7 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
       </div>
       <div class="panel">
         <div class="ph">GPUS</div>
-        <div class="pv">{_render_gpus(nv.gpus)}</div>
+        <div class="pv">{_render_gpus(nv.gpus, nv.capabilities)}</div>
       </div>
       <div class="panel">
         <div class="ph">ADVICE</div>
