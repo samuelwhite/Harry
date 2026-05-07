@@ -11,6 +11,7 @@ from app.health import compute_health
 from app.rules import evaluate as rules_evaluate
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
 from app.service_awareness import build_service_rows
+from app.node_metadata import node_display_name, node_meta_summary
 from app.ui.db import (
     STALE_SECONDS,
     _db,
@@ -46,28 +47,8 @@ except Exception:
     advice_build = None
 
 
-SCREENSHOT_NAME_ALIASES = {
-    "DESKTOP-8QV3E94": "compute-node-1",
-    "Desktop-Sam": "gaming-pc-1",
-    "DESKTOP-SAM": "gaming-pc-1",
-    "alfred": "server-1",
-    "cortex": "ai-node-1",
-    "jarvis": "compute-node-2",
-    "lois-edge": "edge-node-1",
-    "pi-kiosk": "kiosk-1",
-    "pihole": "network-node-1",
-}
-
-
-def _screenshot_mode_enabled() -> bool:
-    return (os.environ.get("HARRY_SCREENSHOT_MODE") or "").strip().lower() in ("1", "true", "yes", "on")
-
-
 def _display_node_name(name: str) -> str:
-    clean = (name or "").strip()
-    if not _screenshot_mode_enabled():
-        return clean
-    return SCREENSHOT_NAME_ALIASES.get(clean, clean)
+    return node_display_name(name)
 
 
 def _fleet_sidebar(hours: int, debug: bool) -> List[Dict[str, Any]]:
@@ -1704,6 +1685,8 @@ def _render_hidden_nodes(hidden_nodes: List[NodeView], hours: int) -> str:
 
 def _render_single_node_overview(nv: NodeView, hours: int) -> str:
     setup_href = f"/downloads#downloads-instructions"
+    meta = node_meta_summary(nv.node)
+    meta_line = f" · {meta}" if meta else ""
     return f"""
 <div class="section" id="single-node-overview">
   <div class="sectionhead">
@@ -1719,7 +1702,7 @@ def _render_single_node_overview(nv: NodeView, hours: int) -> str:
       <div class="advrow">
         <div class="advleft">
           <div class="advnode">{_html_escape(_display_node_name(nv.node))}</div>
-          <div class="advmsg">Machine identity: {_html_escape(nv.model or nv.cpu or 'unknown hardware')}</div>
+          <div class="advmsg">Machine identity: {_html_escape(nv.model or nv.cpu or 'unknown hardware')}{_html_escape(meta_line)}</div>
         </div>
       </div>
       <div class="advrow">
@@ -1745,6 +1728,7 @@ def _render_single_node_overview(nv: NodeView, hours: int) -> str:
 
 def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
     display_name = _display_node_name(nv.node)
+    meta = node_meta_summary(nv.node)
     dot = _sev_dot(nv.worst)
     model = f" ({nv.model})" if nv.model else ""
     agent_state = _agent_version_state(nv.agent_version, AGENT_VERSION)
@@ -1822,6 +1806,7 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
         Agent {_html_escape(display_agent_version(nv.agent_version))}{' · behind' if agent_state == 'behind' else ''}
       </div>
       <div class="subtitle">{_html_escape(nv.headline)}</div>
+      {f'<div class="muted" style="margin-top:6px; font-size:12px;">{_html_escape(meta)}</div>' if meta else ''}
       {top_action_line}
     </div>
     <div class="right">

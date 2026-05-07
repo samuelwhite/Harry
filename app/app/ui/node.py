@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 from fastapi import HTTPException
 
 from app.machine_summary import get_machine_summary
+from app.node_metadata import node_display_name, node_meta_summary
 from app.versions import AGENT_VERSION, BRAIN_VERSION
 
 from .db import get_latest_node_record, _load_schema_current, _raw_payload
@@ -66,6 +67,8 @@ def _node_actions(node: str, hours: int) -> List[Dict[str, str]]:
 
 
 def render_node_detail(node: str, hours: int) -> str:
+    display_name = node_display_name(node.strip())
+    meta = node_meta_summary(node.strip())
     row = get_latest_node_record(node.strip())
     if not row:
         raise HTTPException(status_code=404, detail="not_found")
@@ -105,10 +108,13 @@ def render_node_detail(node: str, hours: int) -> str:
         f"<strong>Schema</strong> {_html_escape(schema_current)}"
     )
 
-    page_subtitle = (
-        f"<span>{_html_escape(row['ts'])}</span>"
-        f"<span>·</span><span>Inspect stored payload and captured raw data</span>"
-    )
+    subtitle_bits = [
+        f"<span>{_html_escape(row['ts'])}</span>",
+        "<span>·</span><span>Inspect stored payload and captured raw data</span>",
+    ]
+    if meta:
+        subtitle_bits.extend([f"<span>·</span><span>{_html_escape(meta)}</span>"])
+    page_subtitle = "".join(subtitle_bits)
 
     content = f"""
 {summary_html}
@@ -141,9 +147,9 @@ def render_node_detail(node: str, hours: int) -> str:
 """
 
     return render_shell(
-        title=f"HARRY • {node}",
+        title=f"HARRY • {display_name}",
         active_page="node",
-        page_title=node,
+        page_title=display_name,
         page_subtitle=page_subtitle,
         sidebar_sections=_node_sidebar(node=node, hours=hours),
         actions=_node_actions(node=node, hours=hours),

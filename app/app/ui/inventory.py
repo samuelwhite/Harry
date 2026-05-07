@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
+from app.node_metadata import node_display_name, node_meta_summary
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
 from app.ui.capabilities import gpu_state_message
 
@@ -131,6 +132,8 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
     metrics = _get_metrics(payload)
     if not gpus:
         gpus = _get_gpu_list(metrics, _raw_payload(payload))
+    display_name = node_display_name(node)
+    meta = node_meta_summary(node)
 
     def clean_list(xs: List[Any], keys: List[str]) -> List[Dict[str, Any]]:
         out = []
@@ -142,6 +145,8 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
 
     return {
         "node": node,
+        "display_name": display_name,
+        "meta": meta,
         "last_seen": ts,
         "agent_version": agent_version,
         "model": model,
@@ -173,7 +178,11 @@ def _inventory_md(rows: List[Dict[str, Any]]) -> str:
     lines.append("# HARRY — Hardware Inventory")
     lines.append("")
     for r in rows:
-        lines.append(f"## {r.get('node')}")
+        lines.append(f"## {r.get('display_name') or r.get('node')}")
+        if r.get("display_name") and r.get("display_name") != r.get("node"):
+            lines.append(f"- Display name: `{r.get('display_name')}`")
+        if r.get("meta"):
+            lines.append(f"- Node metadata: `{r.get('meta')}`")
         lines.append(f"- Last seen: `{r.get('last_seen')}`")
         lines.append(f"- Agent: `{r.get('agent_version') or 'unknown'}`")
         lines.append(f"- Model: `{r.get('model') or '—'}`")
@@ -294,6 +303,8 @@ def render_inventory_page(hours: int, debug: bool) -> str:
 
     for r in rows:
         node = r.get("node") or "—"
+        display_name = r.get("display_name") or node
+        meta = r.get("meta") or ""
         model = r.get("model") or "—"
         cpu = r.get("cpu") or "—"
         ram = _fmt_ram(r)
@@ -307,7 +318,10 @@ def render_inventory_page(hours: int, debug: bool) -> str:
         table_rows.append(
             f"""
 <tr>
-  <td><a href="/node/{node}?hours={hours}">{node}</a></td>
+  <td>
+    <a href="/node/{node}?hours={hours}">{_html_escape(display_name)}</a>
+    {f'<div class="muted" style="font-size:12px;">{_html_escape(meta)}</div>' if meta else ''}
+  </td>
   <td>{model}</td>
   <td>{cpu}</td>
   <td>{ram}</td>
@@ -323,8 +337,9 @@ def render_inventory_page(hours: int, debug: bool) -> str:
 <div class="card">
   <div class="sectionhead">
     <div>
-      <div class="h2"><a href="/node/{node}?hours={hours}">{node}</a></div>
+      <div class="h2"><a href="/node/{node}?hours={hours}">{_html_escape(display_name)}</a></div>
       <div class="h2sub">{model}</div>
+      {f'<div class="muted" style="font-size:12px; margin-top:4px;">{_html_escape(meta)}</div>' if meta else ''}
     </div>
     <div class="pill">{last_seen}</div>
   </div>
