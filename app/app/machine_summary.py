@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from urllib import request as urllib_request
 
 from app.config import DATA_DIR
+from app.ui.db import record_event
 
 
 SUMMARY_CACHE_DIR = DATA_DIR / "machine_summaries"
@@ -175,6 +176,26 @@ def _write_cache(record: Dict[str, Any]) -> None:
         pass
 
 
+def _record_summary_event(payload: Dict[str, Any], record: Dict[str, Any]) -> None:
+    try:
+        node = str(payload.get("node") or payload.get("facts", {}).get("hostname") or "unknown")
+        source = str(record.get("source") or "local")
+        record_event(
+            level="info",
+            type="summary.refreshed",
+            title="Summary refreshed",
+            message=f"Machine summary refreshed from {source}.",
+            node_id=node,
+            metadata={
+                "source": source,
+                "fingerprint": record.get("fingerprint"),
+                "generated_at": record.get("generated_at"),
+            },
+        )
+    except Exception:
+        pass
+
+
 def _call_local_llm(prompt: str) -> str:
     base_url = _llm_base_url()
     if not base_url:
@@ -246,6 +267,7 @@ def build_machine_summary(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "summary": local_text,
     }
     _write_cache(record)
+    _record_summary_event(payload, record)
     return record
 
 
@@ -305,5 +327,6 @@ def get_machine_summary(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "summary": _render_local_summary(payload),
     }
     _write_cache(local)
+    _record_summary_event(payload, local)
     _maybe_queue_refresh(payload, fingerprint)
     return local

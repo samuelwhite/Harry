@@ -17,6 +17,12 @@ from app.config import DATA_DIR, DB_PATH
 from app.harry_normalise import normalise_for_schema
 from app.harry_schema import validate_harry_snapshot
 from app.health import compute_health
+from app.ui.db import (
+    STALE_SECONDS,
+    get_latest_node_record,
+    get_recent_events,
+    record_event,
+)
 from app.versions import (
     BRAIN_VERSION,
     AGENT_VERSION,
@@ -103,6 +109,23 @@ def _init_db():
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ingest_node_ts ON ingest(node, ts)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            level TEXT NOT NULL,
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            node_id TEXT,
+            machine_id TEXT,
+            metadata TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_node_created_at ON events(node_id, created_at DESC)")
     conn.commit()
     conn.close()
 
@@ -292,6 +315,151 @@ def _agent_status_view(payload: Dict[str, Any]) -> Dict[str, Any]:
         "last_success_at": raw.get("last_success_at"),
         "last_error_at": raw.get("last_error_at"),
     }
+
+
+def _safe_dict(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _safe_list(value: Any) -> List[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _payload_gpus(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    metrics = _safe_dict(payload.get("metrics"))
+    facts = _safe_dict(payload.get("facts"))
+    gpus = _safe_list(metrics.get("gpu"))
+    if not gpus:
+        gpus = _safe_list(facts.get("gpus"))
+    return [g for g in gpus if isinstance(g, dict)]
+
+
+def _max_disk_used_pct(payload: Dict[str, Any]) -> Optional[float]:
+    metrics = _safe_dict(payload.get("metrics"))
+    used: List[float] = []
+    for disk in _safe_list(metrics.get("disk_used")):
+        if not isinstance(disk, dict):
+            continue
+        value = disk.get("used_pct", disk.get("pct"))
+        try:
+            if value is not None:
+                used.append(float(value))
+        except Exception:
+            continue
+    return max(used) if used else None
+
+
+def _parse_ts_utc(s: str | None) -> Optional[datetime]:
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s)
+    except Exception:
+        return None
+
+
+def _record_event(
+    *,
+    level: str,
+    type: str,
+    title: str,
+    message: str,
+    node_id: str,
+    metadata: Dict[str, Any] | None = None,
+) -> None:
+    try:
+        record_event(
+            level=level,
+            type=type,
+            title=title,
+            message=message,
+            node_id=node_id,
+            metadata=metadata or {},
+        )
+    except Exception:
+        pass
+
+
+def _emit_ingest_events(previous: Dict[str, Any], current: Dict[str, Any]) -> None:
+    node = str(current.get("node") or previous.get("node") or "unknown")
+    current_ts = str(current.get("ts") or "")
+    previous_ts = str(previous.get("ts") or "")
+    current_dt = _parse_ts_utc(current_ts)
+    previous_dt = _parse_ts_utc(previous_ts)
+
+    if not previous:
+        _record_event(
+            level="success",
+            type="agent.first_seen",
+            title="Agent first seen",
+            message=f"{node} checked in for the first time.",
+            node_id=node,
+            metadata={"reported_at": current_ts},
+        )
+    elif current_dt and previous_dt:
+        gap_seconds = (current_dt - previous_dt).total_seconds()
+        if gap_seconds > STALE_SECONDS:
+            gap_minutes = max(1, int(gap_seconds // 60))
+            _record_event(
+                level="warning",
+                type="agent.heartbeat_missed",
+                title="Agent missed heartbeat",
+                message=f"Missed heartbeat for about {gap_minutes}m before this report.",
+                node_id=node,
+                metadata={"gap_seconds": int(gap_seconds), "previous_report_at": previous_ts, "reported_at": current_ts},
+            )
+            _record_event(
+                level="success",
+                type="agent.heartbeat_restored",
+                title="Heartbeat restored",
+                message=f"Heartbeat restored after about {gap_minutes}m.",
+                node_id=node,
+                metadata={"gap_seconds": int(gap_seconds), "previous_report_at": previous_ts, "reported_at": current_ts},
+            )
+
+    current_status = _agent_status_view(current)
+    previous_status = _agent_status_view(previous) if previous else {}
+    current_state = str(current_status.get("state") or "").lower()
+    previous_state = str(previous_status.get("state") or "").lower()
+    bad_states = {"bootstrapping", "degraded", "error"}
+
+    if current_state in bad_states or current_status.get("ok") is False:
+        if previous_state not in bad_states and previous_status.get("ok") is not False:
+            sev = "error" if current_state == "error" else "warning"
+            _record_event(
+                level=sev,
+                type="agent.offline",
+                title="Agent offline",
+                message=f"{node} reported state {current_state or 'unknown'}.",
+                node_id=node,
+                metadata={"state": current_state, "previous_state": previous_state or None, "reported_at": current_ts},
+            )
+
+    prev_gpus = _payload_gpus(previous) if previous else []
+    current_gpus = _payload_gpus(current)
+    if current_gpus and not prev_gpus:
+        _record_event(
+            level="info",
+            type="hardware.gpu_detected",
+            title="GPU detected",
+            message=f"{node} reported {len(current_gpus)} GPU(s).",
+            node_id=node,
+            metadata={"gpu_count": len(current_gpus), "reported_at": current_ts},
+        )
+
+    prev_disk = _max_disk_used_pct(previous) if previous else None
+    current_disk = _max_disk_used_pct(current)
+    if current_disk is not None and current_disk >= 90 and (prev_disk is None or prev_disk < 90):
+        _record_event(
+            level="warning",
+            type="storage.disk_warning",
+            title="Disk usage warning",
+            message=f"Disk usage reached {current_disk:.0f}%.",
+            node_id=node,
+            metadata={"used_pct": current_disk, "reported_at": current_ts},
+        )
 
 
 @app.get("/schema/harry/{version}", response_model=None)
@@ -699,6 +867,15 @@ async def ingest(req: Request):
 
     node = payload.get("node") or payload.get("facts", {}).get("hostname") or "unknown"
     ts = payload.get("ts") or _iso_utc_now()
+    previous_row = get_latest_node_record(str(node).strip())
+    previous_payload: Dict[str, Any] = {}
+    if previous_row:
+        try:
+            previous_payload = json.loads(previous_row["payload"])
+            if not isinstance(previous_payload, dict):
+                previous_payload = {}
+        except Exception:
+            previous_payload = {}
 
     try:
         conn = _db()
@@ -718,4 +895,25 @@ async def ingest(req: Request):
         f"schema_version={payload.get('schema_version', 'unknown')}"
     )
 
+    try:
+        _emit_ingest_events(previous_payload, payload)
+    except Exception:
+        pass
+
     return {"ok": True, "node": node, "ts": ts}
+
+
+@app.get("/api/events", response_model=None)
+def api_events(limit: int = 50):
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 50
+    limit = max(1, min(limit, 500))
+
+    events = get_recent_events(limit=limit, sync_stale=True)
+    return {
+        "ok": True,
+        "count": len(events),
+        "events": events,
+    }

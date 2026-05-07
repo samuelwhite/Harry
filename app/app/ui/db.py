@@ -77,6 +77,27 @@ def _ensure_hidden_nodes_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _ensure_events_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            level TEXT NOT NULL,
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            node_id TEXT,
+            machine_id TEXT,
+            metadata TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_node_created_at ON events(node_id, created_at DESC)")
+    conn.commit()
+
+
 def _db() -> sqlite3.Connection:
     db_path = Path(DB_PATH)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,6 +105,7 @@ def _db() -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     _ensure_hidden_nodes_table(conn)
+    _ensure_events_table(conn)
     return conn
 
 
@@ -187,6 +209,150 @@ def _get_facts(p: Dict[str, Any]) -> Dict[str, Any]:
 def _get_metrics(p: Dict[str, Any]) -> Dict[str, Any]:
     metrics = p.get("metrics")
     return metrics if isinstance(metrics, dict) else {}
+
+
+def _event_row(row: sqlite3.Row) -> Dict[str, Any]:
+    metadata = {}
+    try:
+        raw = row["metadata"]
+        if raw:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                metadata = parsed
+    except Exception:
+        metadata = {}
+
+    return {
+        "id": row["id"],
+        "created_at": row["created_at"],
+        "level": row["level"],
+        "type": row["type"],
+        "title": row["title"],
+        "message": row["message"],
+        "node_id": row["node_id"],
+        "machine_id": row["machine_id"],
+        "metadata": metadata,
+    }
+
+
+def _insert_event(
+    conn: sqlite3.Connection,
+    *,
+    created_at: Optional[str] = None,
+    level: str,
+    type: str,
+    title: str,
+    message: str,
+    node_id: Optional[str] = None,
+    machine_id: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> int:
+    payload = json.dumps(metadata or {}, separators=(",", ":"), ensure_ascii=False)
+    ts = created_at or _utcnow().isoformat().replace("+00:00", "Z")
+    cur = conn.execute(
+        """
+        INSERT INTO events(created_at, level, type, title, message, node_id, machine_id, metadata)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (ts, level, type, title, message, node_id, machine_id, payload),
+    )
+    return int(cur.lastrowid or 0)
+
+
+def record_event(
+    *,
+    level: str,
+    type: str,
+    title: str,
+    message: str,
+    node_id: Optional[str] = None,
+    machine_id: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    created_at: Optional[str] = None,
+) -> int:
+    with _db() as conn:
+        event_id = _insert_event(
+            conn,
+            created_at=created_at,
+            level=level,
+            type=type,
+            title=title,
+            message=message,
+            node_id=node_id,
+            machine_id=machine_id,
+            metadata=metadata,
+        )
+        conn.commit()
+        return event_id
+
+
+def _get_latest_event_for_node_type(conn: sqlite3.Connection, node_id: str, type: str) -> Optional[Dict[str, Any]]:
+    cur = conn.execute(
+        """
+        SELECT id, created_at, level, type, title, message, node_id, machine_id, metadata
+        FROM events
+        WHERE node_id = ? AND type = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        (node_id, type),
+    )
+    row = cur.fetchone()
+    return _event_row(row) if row else None
+
+
+def _sync_offline_events(conn: sqlite3.Connection) -> None:
+    latest = _fetch_latest_per_node(conn)
+    now = _utcnow()
+
+    for node, rec in latest.items():
+        ts = _parse_ts(rec.get("ts") or "")
+        if not ts:
+            continue
+
+        age_seconds = (now - ts).total_seconds()
+        if age_seconds < STALE_SECONDS:
+            continue
+
+        existing = _get_latest_event_for_node_type(conn, node, "agent.heartbeat_missed")
+        if existing:
+            existing_ts = _parse_ts(existing.get("created_at") or "")
+            if existing_ts and existing_ts >= ts:
+                continue
+
+        age_minutes = int(age_seconds // 60)
+        message = f"Missed heartbeat for about {age_minutes}m."
+        _insert_event(
+            conn,
+            level="warning",
+            type="agent.heartbeat_missed",
+            title="Agent missed heartbeat",
+            message=message,
+            node_id=node,
+            metadata={"age_seconds": int(age_seconds), "latest_report_at": rec.get("ts")},
+        )
+    conn.commit()
+
+
+def get_recent_events(limit: int = 50, sync_stale: bool = True) -> List[Dict[str, Any]]:
+    limit = max(1, min(int(limit or 50), 500))
+    with _db() as conn:
+        if sync_stale:
+            try:
+                _sync_offline_events(conn)
+            except Exception:
+                pass
+
+        rows = conn.execute(
+            """
+            SELECT id, created_at, level, type, title, message, node_id, machine_id, metadata
+            FROM events
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [_event_row(row) for row in rows]
 
 
 def get_latest_node_records() -> Dict[str, Dict[str, Any]]:
