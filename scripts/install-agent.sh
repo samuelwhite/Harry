@@ -6,6 +6,9 @@ AGENT_PATH="${AGENT_DIR}/harry_agent.sh"
 TMP_AGENT="$(mktemp /tmp/harry_agent_install.XXXXXX.sh)"
 ALLOW_REPOINT="${HARRY_ALLOW_REPOINT:-0}"
 HARRY_BASE_URL="${HARRY_BASE_URL:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PACKAGED_AGENT_SCRIPT="$SCRIPT_DIR/harry_agent.sh"
+DEV_AGENT_SCRIPT="$SCRIPT_DIR/../agent/harry_agent.sh"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1
@@ -129,13 +132,38 @@ fi
 
 mkdir -p "$AGENT_DIR"
 
-if [ -n "${HARRY_BASE_URL:-}" ]; then
-  echo "==> Downloading Harry agent from ${HARRY_BASE_URL}/dist/harry_agent.sh"
-  curl -fsSL "${HARRY_BASE_URL}/dist/harry_agent.sh" -o "$TMP_AGENT"
-else
-  echo "==> Installing bundled Harry agent (runtime discovery will resolve the Brain URL)"
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  cp "$SCRIPT_DIR/../agent/harry_agent.sh" "$TMP_AGENT"
+fetch_agent_script() {
+  local source_desc=""
+
+  if [ -n "${HARRY_BASE_URL:-}" ]; then
+    echo "==> Downloading Harry agent from ${HARRY_BASE_URL}/dist/harry_agent.sh"
+    if curl -fsSL "${HARRY_BASE_URL}/dist/harry_agent.sh" -o "$TMP_AGENT"; then
+      return 0
+    fi
+    echo "WARNING: Could not download Harry agent from Brain. Trying local fallbacks..." >&2
+  fi
+
+  if [ -f "$PACKAGED_AGENT_SCRIPT" ]; then
+    source_desc="$PACKAGED_AGENT_SCRIPT"
+  elif [ -f "$DEV_AGENT_SCRIPT" ]; then
+    source_desc="$DEV_AGENT_SCRIPT"
+  fi
+
+  if [ -n "$source_desc" ]; then
+    echo "==> Installing Harry agent from ${source_desc}"
+    cp "$source_desc" "$TMP_AGENT"
+    return 0
+  fi
+
+  echo "ERROR: Could not obtain the Harry agent script." >&2
+  echo "Tried Brain download, packaged script at $PACKAGED_AGENT_SCRIPT, and repo checkout at $DEV_AGENT_SCRIPT." >&2
+  echo "Ensure the Brain is reachable or stage harry_agent.sh alongside install-agent.sh." >&2
+  return 1
+}
+
+if ! fetch_agent_script; then
+  rm -f "$TMP_AGENT" >/dev/null 2>&1 || true
+  exit 1
 fi
 
 if [ ! -s "$TMP_AGENT" ]; then

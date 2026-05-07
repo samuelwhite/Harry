@@ -218,6 +218,9 @@ if [[ -d "$SCRIPT_DIR/scripts" ]]; then
   cp -a "$SCRIPT_DIR/scripts" "$INSTALL_DIR/"
 fi
 
+install -d "$INSTALL_DIR/scripts"
+cp -a "$SCRIPT_DIR/agent/harry_agent.sh" "$INSTALL_DIR/scripts/harry_agent.sh"
+
 # Determine hostname for brain node
 BRAIN_NODE_NAME="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo brain)"
 echo "==> Brain node name: ${BRAIN_NODE_NAME}"
