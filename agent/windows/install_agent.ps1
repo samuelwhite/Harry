@@ -39,14 +39,14 @@ function Normalize-BrainUrl {
     }
 
     # If no explicit port was supplied, Uri will give default 80/443.
-    # For Harry, default to 8787 unless the user explicitly entered a port.
+    # For Harry, default to 8789 unless the user explicitly entered a port.
     $explicitPort = $false
     if ($InputUrl -match ":\d+(/|$)") {
         $explicitPort = $true
     }
 
     if (-not $explicitPort) {
-        $port = 8787
+        $port = 8789
     }
 
     return "${scheme}://${brainHost}:${port}"

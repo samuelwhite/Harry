@@ -21,10 +21,10 @@ import re
 # -----------------------------------------------------------------------------
 
 # Brain release version (calendar versioning)
-BRAIN_VERSION = "2026.03.23"
+BRAIN_VERSION = "2026.05.09"
 
 # Distributed agent script version (not the schema version)
-AGENT_VERSION = "0.2.3"
+AGENT_VERSION = "0.2.5"
 
 # -----------------------------------------------------------------------------
 # Schema mismatch escalation policy

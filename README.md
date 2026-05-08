@@ -34,7 +34,7 @@ The installer will:
 • install Harry Brain  
 • install the local Agent  
 • configure services  
-• open firewall port (8787)  
+• open firewall ports as needed
 • start everything automatically  
 • open the dashboard  
 
@@ -140,7 +140,7 @@ Downloads
 Harry Agents must reach the Brain over HTTP.
 
 Default Brain listen port:
-8787
+8789
 
 Example public agent-facing address:
 HARRY_PUBLIC_BASE_URL=http://<brain-ip>:8789
@@ -148,7 +148,7 @@ HARRY_BRAIN_LAN_IP=<brain-ip> HARRY_PUBLIC_PORT=8789
 
 Requirements:
 
-• allow TCP port 8787 through firewall  
+• allow TCP port 8789 through firewall
 • ensure machines can reach the Brain  
 
 Different subnets?
@@ -168,7 +168,7 @@ Agent cannot connect:
 
 • check Brain is running  
 • open Brain URL from Agent machine  
-• ensure port 8787 is open  
+• ensure port 8789 is open
 
 Node not appearing:
 

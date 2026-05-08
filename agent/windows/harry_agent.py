@@ -12,7 +12,7 @@ except ImportError:
     print("psutil not installed")
     raise SystemExit(1)
 
-AGENT_VERSION = "0.2.3"
+AGENT_VERSION = "0.2.5"
 SCHEMA_VERSION = "0.2.3"
 CONFIG_PATH = r"C:\ProgramData\Harry\agent_config.json"
 POLL_SECONDS = 30
@@ -35,7 +35,7 @@ config = load_config()
 BRAIN_URL = (
     config.get("brain_url")
     or os.environ.get("HARRY_BASE_URL")
-    or "http://harry-brain:8787"
+    or "http://harry-brain:8789"
 ).rstrip("/")
 ENDPOINT = f"{BRAIN_URL}/ingest"
 

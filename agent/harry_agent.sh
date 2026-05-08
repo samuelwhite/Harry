@@ -5,9 +5,9 @@ set -euo pipefail
 # Harry Agent (self-updating, robust)
 # -----------------------------------------------------------------------------
 
-AGENT_VERSION="0.2.3"
+AGENT_VERSION="0.2.5"
 SCHEMA_VERSION="0.2.3"
-BRAIN_VERSION="2026.03.08"
+BRAIN_VERSION="2026.05.09"
 
 CURL="${CURL:-/usr/bin/curl}"
 PYTHON="${PYTHON:-python3}"
@@ -284,7 +284,7 @@ resolve_brain_url() {
   if [ -n "$cached" ]; then
     candidates+=("${cached%/}")
   fi
-  candidates+=("http://harry-brain.local:8787" "http://localhost:8787")
+  candidates+=("http://harry-brain.local:8789" "http://localhost:8789")
 
   for candidate in "${candidates[@]}"; do
     [ -n "$candidate" ] || continue
@@ -300,7 +300,7 @@ resolve_brain_url() {
 
 if ! HARRY_BASE_URL="$(resolve_brain_url)"; then
   echo "ERROR: Harry agent could not determine the Brain URL." >&2
-  echo "Tried, in order: HARRY_BASE_URL, cached last-known-good URL, http://harry-brain.local:8787, http://localhost:8787" >&2
+  echo "Tried, in order: HARRY_BASE_URL, cached last-known-good URL, http://harry-brain.local:8789, http://localhost:8789" >&2
   echo "Set HARRY_BASE_URL explicitly or ensure the Brain is reachable on one of the fallback addresses." >&2
   exit 21
 fi

@@ -93,7 +93,7 @@ def test_node_summary_strips_platform_suffix_from_agent_version():
     payload = {
         "node": "node-1",
         "ts": "2026-05-07T12:00:00Z",
-        "agent_version": "0.2.3-windows-dev",
+        "agent_version": "0.2.5-windows-dev",
         "facts": {},
         "metrics": {"disk_used": [], "temps_c": {}, "gpu": [], "extensions": {}},
         "derived": {"health": {"state": "unknown", "worst_severity": "unknown", "reasons": []}, "extensions": {}},
@@ -102,7 +102,7 @@ def test_node_summary_strips_platform_suffix_from_agent_version():
 
     summary = main._node_summary(payload, ctx={})
 
-    assert summary["agent_version"] == "0.2.3"
+    assert summary["agent_version"] == "0.2.5"
 
 
 def test_render_shell_includes_page_eyebrow():
@@ -147,8 +147,8 @@ def test_discover_endpoint_reports_brain_identity(monkeypatch, tmp_path):
     assert data["ok"] is True
     assert data["service"] == "harry-brain"
     assert data["display_name"] == "Harry Brain"
-    assert data["brain_version"] == "2026.03.23"
-    assert data["agent_version"] == "0.2.3"
+    assert data["brain_version"] == "2026.05.09"
+    assert data["agent_version"] == "0.2.5"
     assert data["schema_current"] == "0.2.3"
     assert data["base_url"] == "http://brain.example:8789"
     assert data["ingest_url"] == "http://brain.example:8789/ingest"

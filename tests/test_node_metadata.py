@@ -61,7 +61,7 @@ def test_inventory_rows_include_node_metadata(monkeypatch, tmp_path):
                 "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "payload": {
                     "node": "node-1",
-                    "agent_version": "0.2.3",
+                    "agent_version": "0.2.5",
                     "facts": {},
                     "metrics": {"disk_used": [], "temps_c": {}, "gpu": [], "extensions": {}},
                     "derived": {"health": {"state": "healthy", "worst_severity": "ok", "reasons": []}, "extensions": {}},

@@ -17,7 +17,7 @@ def test_render_fleet_live_uses_single_node_mode(monkeypatch):
         headline="Everything looks calm.",
         health_state="healthy",
         stale=False,
-        agent_version="0.2.3",
+        agent_version="0.2.5",
         cpu_pressure_avg_72h=None,
         temp_c=None,
         ram_used_pct=48.5,
