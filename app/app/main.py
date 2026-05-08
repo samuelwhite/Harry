@@ -515,6 +515,30 @@ def health():
     }
 
 
+def _discovery_payload(request: Request) -> Dict[str, Any]:
+    from app.ui.router import _resolve_brain_urls
+
+    base_url, _ = _resolve_brain_urls(request)
+    ingest_url = f"{base_url.rstrip('/')}/ingest"
+
+    return {
+        "ok": True,
+        "service": "harry-brain",
+        "display_name": "Harry Brain",
+        "brain_version": BRAIN_VERSION,
+        "agent_version": AGENT_VERSION,
+        "schema_current": SCHEMA_CURRENT,
+        "base_url": base_url,
+        "ingest_url": ingest_url,
+    }
+
+
+@app.get("/discover", response_model=None)
+@app.get("/.well-known/harry-brain", response_model=None)
+def discover(request: Request):
+    return _discovery_payload(request)
+
+
 @app.get("/version", response_model=None)
 def version():
     return {

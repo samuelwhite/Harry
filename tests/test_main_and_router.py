@@ -134,6 +134,29 @@ def test_fleet_page_does_not_inject_full_page_refresh_script(monkeypatch):
     assert "refreshFleet" not in fleet_html
 
 
+def test_discover_endpoint_reports_brain_identity(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://brain.example:8789")
+
+    with TestClient(main.app) as client:
+        resp = client.get("/discover")
+        well_known = client.get("/.well-known/harry-brain")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["service"] == "harry-brain"
+    assert data["display_name"] == "Harry Brain"
+    assert data["brain_version"] == "2026.03.23"
+    assert data["agent_version"] == "0.2.3"
+    assert data["schema_current"] == "0.2.3"
+    assert data["base_url"] == "http://brain.example:8789"
+    assert data["ingest_url"] == "http://brain.example:8789/ingest"
+
+    assert well_known.status_code == 200
+    assert well_known.json() == data
+
+
 def test_downloads_prefers_non_local_public_base_url(monkeypatch, tmp_path):
     monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://brain.example:8789")
     html = _render_downloads(monkeypatch, tmp_path)
