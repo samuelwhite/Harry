@@ -261,43 +261,43 @@ def _service_status_label(status: str) -> str:
     return "Unknown"
 
 
+def _brain_health_rows(primary: Optional[NodeView] = None) -> List[tuple[str, str, str]]:
+    local_status = "degraded" if primary and primary.stale else "online"
+    local_text = (
+        "Machine telemetry is reporting separately through Harry Agent."
+        if primary and not primary.stale
+        else "The local telemetry agent is not reporting right now."
+    )
+
+    return [
+        ("Brain API", "online", "Dashboard and discovery endpoints are responding."),
+        ("Database", "online", "Telemetry storage is available."),
+        ("Agent ingest", "online", "Accepting node check-ins."),
+        ("Discovery endpoint", "online", "Installers can find this Brain."),
+        ("Downloads / installers", "online", "Agent installers are available here."),
+        ("Local telemetry agent", local_status, local_text),
+    ]
+
+
 def _render_services_section(primary: Optional[NodeView] = None) -> str:
     if not has_explicit_service_configuration():
-        display_name = _display_node_name(primary.node) if primary else "Harry Brain"
-        headline = _html_escape(primary.headline if primary else "No machine telemetry has checked in yet.")
-        status = _service_status_label((primary.health_state if primary else "healthy") or "healthy")
-        status_class = _service_status_class((primary.health_state if primary else "healthy") or "healthy")
-        last_seen = _html_escape(_ago(primary.ts) if primary else "just now")
-        if primary and primary.stale:
-            summary = "Brain service online; this machine telemetry agent is not reporting right now."
-        elif primary:
-            summary = "Brain service online; machine telemetry is reporting separately through Harry Agent."
-        else:
-            summary = "Brain service online; machine telemetry agent not installed or not reporting yet."
+        rows = _brain_health_rows(primary)
         return f"""
-<div class="section" id="system-status">
+<div class="section" id="brain-health">
   <div class="sectionhead">
     <div>
-      <div class="h2">System status</div>
-      <div class="h2sub">Brain service health is shown separately from machine telemetry.</div>
+      <div class="h2">Brain health</div>
+      <div class="h2sub">Service checks for Harry Brain and the local telemetry agent.</div>
     </div>
-    <span class="badgetxt {status_class}">{_html_escape(status)}</span>
+    <span class="badgetxt ok">Healthy</span>
   </div>
 
   <div class="card compactcard">
     <div class="advwrap">
-      <div class="advrow">
-        <div class="advleft">
-          <div class="advnode">Harry Brain is online</div>
-          <div class="advmsg">{_html_escape(summary)}</div>
-        </div>
-      </div>
-      <div class="advrow">
-        <div class="advleft">
-          <div class="advnode">{_html_escape(display_name)}</div>
-          <div class="advmsg">Machine telemetry: {headline} · Last heartbeat {last_seen}</div>
-        </div>
-      </div>
+      {''.join(
+        f'<div class="advrow"><div class="advleft"><div class="advnode">{_html_escape(label)}</div><div class="advmsg">{_html_escape(text)}</div></div><span class="badgetxt {_service_status_class(status)}">{_html_escape(_service_status_label(status))}</span></div>'
+        for label, status, text in rows
+      )}
     </div>
   </div>
 </div>

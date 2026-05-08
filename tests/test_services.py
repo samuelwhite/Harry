@@ -128,10 +128,12 @@ def test_render_fleet_live_uses_small_system_status_when_no_service_config(monke
 
     html = fleet_ui.render_fleet_live(hours=72, debug=False)
 
-    assert "System status" in html
+    assert "Brain health" in html
     assert "Watched services" not in html
-    assert "Harry Brain is online" in html
-    assert "Brain service health is shown separately from machine telemetry." in html
+    assert "Brain API" in html
+    assert "Discovery endpoint" in html
+    assert "Local telemetry agent" in html
+    assert "Service checks for Harry Brain and the local telemetry agent." in html
 
 
 def test_render_fleet_live_explains_missing_machine_telemetry_when_brain_is_online(monkeypatch, tmp_path):
@@ -139,8 +141,8 @@ def test_render_fleet_live_explains_missing_machine_telemetry_when_brain_is_onli
 
     html = fleet_ui.render_fleet_live(hours=72, debug=False)
 
-    assert "Harry Brain is online" in html
-    assert "machine telemetry agent not installed or not reporting yet" in html
+    assert "Local telemetry agent" in html
+    assert "not reporting right now" in html
 
 
 def test_api_services_returns_service_rows(monkeypatch, tmp_path):
