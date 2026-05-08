@@ -23,7 +23,7 @@ BLOCKED = [
     "white" + " family",
     "white" + "family" + "home",
     "harry." + "white" + "family" + "home.net",
-    "192.168.7" + ".",
+    "192.168." + "7" + ".",
     "desk" + "top" + "-" + "sa" + "m",
     "samsungjultokluno" + "pate",
 ]
