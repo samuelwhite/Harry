@@ -201,7 +201,9 @@ def test_downloads_rejects_detected_docker_bridge_ip(monkeypatch, tmp_path):
     monkeypatch.setattr(router, "_detect_lan_ip", lambda: "172.17.0.2")
     html = _render_downloads(monkeypatch, tmp_path)
 
-    assert 'id="brain-url">http://&lt;brain-ip&gt;:8789<' in html
+    assert "Not yet determined automatically" in html
+    assert "Need help finding the Brain address?" in html
+    assert "http://<brain-ip>:8789" not in html
 
 
 def test_downloads_rejects_detected_private_bridge_ip(monkeypatch, tmp_path):
@@ -212,7 +214,9 @@ def test_downloads_rejects_detected_private_bridge_ip(monkeypatch, tmp_path):
     monkeypatch.setattr(router, "_detect_lan_ip", lambda: "192.168.240.2")
     html = _render_downloads(monkeypatch, tmp_path)
 
-    assert 'id="brain-url">http://&lt;brain-ip&gt;:8789<' in html
+    assert "Not yet determined automatically" in html
+    assert "Need help finding the Brain address?" in html
+    assert "http://<brain-ip>:8789" not in html
 
 
 def test_downloads_rejects_detected_link_local_ip(monkeypatch, tmp_path):
@@ -223,7 +227,9 @@ def test_downloads_rejects_detected_link_local_ip(monkeypatch, tmp_path):
     monkeypatch.setattr(router, "_detect_lan_ip", lambda: "169.254.10.4")
     html = _render_downloads(monkeypatch, tmp_path)
 
-    assert 'id="brain-url">http://&lt;brain-ip&gt;:8789<' in html
+    assert "Not yet determined automatically" in html
+    assert "Need help finding the Brain address?" in html
+    assert "http://<brain-ip>:8789" not in html
 
 
 def test_downloads_removes_local_only_block(monkeypatch, tmp_path):
@@ -303,6 +309,15 @@ def test_downloads_uses_placeholder_when_lan_ip_is_unavailable(monkeypatch, tmp_
     monkeypatch.setattr(router, "_detect_lan_ip", lambda: None)
     html = _render_downloads(monkeypatch, tmp_path)
 
-    assert 'id="brain-url">http://&lt;brain-ip&gt;:8789<' in html
-    assert "HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789" in html
+    assert "Not yet determined automatically" in html
+    assert "Need help finding the Brain address?" in html
+    assert "Installers will try to discover Harry Brain automatically." in html
+    assert "hostname -I" in html
+    assert "ipconfig" in html
+    assert "http://192.168.1.100:8789" in html
+    assert "http://nas.local:8789" in html
+    assert "HARRY_PUBLIC_BASE_URL=http://192.168.1.100:8789" in html
+    assert "HARRY_BRAIN_LAN_IP=192.168.1.100" in html
+    assert "HARRY_PUBLIC_PORT=8789" in html
+    assert "http://<brain-ip>:8789" not in html
     assert "127.0.0.1" not in html

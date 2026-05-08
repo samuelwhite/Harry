@@ -562,10 +562,10 @@ def _brain_url_warning(url: str) -> str | None:
     lowered = (url or "").strip().lower()
 
     if not lowered:
-        return "No Brain address is configured."
+        return "Harry could not determine a reliable Brain LAN address automatically."
 
-    if "__harry_public_base_url__" in lowered or "__" in lowered:
-        return "The Brain address has not been configured yet."
+    if _is_placeholder_brain_address(lowered) or "__harry_public_base_url__" in lowered or "__" in lowered:
+        return "Harry could not determine a reliable Brain LAN address automatically."
 
     if "127.0.0.1" in lowered or "localhost" in lowered:
         return (
@@ -597,6 +597,7 @@ def ui_health() -> PlainTextResponse:
 def downloads_page(request: Request) -> HTMLResponse:
     brain_url, _local_url = _resolve_brain_urls(request)
     warning = _brain_url_warning(brain_url)
+    needs_guidance = warning is not None or _is_placeholder_brain_address(brain_url)
     downloads_dir = _downloads_dir()
 
     files: list[dict[str, str]] = []
@@ -667,19 +668,22 @@ def downloads_page(request: Request) -> HTMLResponse:
 """
 
     warning_html = ""
-    if warning:
+    if needs_guidance:
+        warning_line = ""
+        if warning:
+            warning_line = f"""
+    <div class="v" style="margin-top:8px;">{html.escape(warning)}</div>
+"""
+
         warning_html = f"""
 <section class="section" id="downloads-warning">
   <div class="card" style="border:1px solid rgba(245, 158, 11, 0.55);">
-    <div class="k">Warning</div>
-    <div class="v" style="margin-top:8px;">{html.escape(warning)}</div>
-    <div class="subtitle" style="margin-top:10px;">
-      On Windows, open <code>Command Prompt</code>, run <code>ipconfig</code>,
-      find your active adapter's <code>IPv4 Address</code>, then use
-      <code>HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789</code> or
-      <code>HARRY_BRAIN_LAN_IP=&lt;brain-ip&gt;</code> with
-      <code>HARRY_PUBLIC_PORT=8789</code> for the address your agents should reach.
-    </div>
+    <div class="k">Need help finding the Brain address?</div>
+    {warning_line}
+    <div class="subtitle" style="margin-top:10px;">Installers will try to discover Harry Brain automatically. If discovery cannot confidently identify a LAN address, the Brain may be behind Docker/container networking, a reverse proxy, multiple interfaces, or missing explicit config.</div>
+    <div class="subtitle" style="margin-top:10px;">Find the Brain machine's LAN IP with <code>hostname -I</code> on Linux/macOS or <code>ipconfig</code> on Windows.</div>
+    <div class="subtitle" style="margin-top:10px;">Use a valid address like <code>http://192.168.1.100:8789</code> or <code>http://nas.local:8789</code>.</div>
+    <div class="subtitle" style="margin-top:10px;">For Docker or reverse-proxy installs, set <code>HARRY_PUBLIC_BASE_URL=http://192.168.1.100:8789</code> or <code>HARRY_BRAIN_LAN_IP=192.168.1.100</code> with <code>HARRY_PUBLIC_PORT=8789</code>.</div>
   </div>
 </section>
 """
@@ -691,13 +695,13 @@ def downloads_page(request: Request) -> HTMLResponse:
   <div class="card">
     <div class="k">Recommended Brain address</div>
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      <div class="v big"><code id="brain-url">{html.escape(brain_url)}</code></div>
-      <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('brain-url').innerText)">
-        Copy
-      </button>
+      <div class="v big">
+        <code id="brain-url">{html.escape(brain_url if not needs_guidance else "Not yet determined automatically")}</code>
+      </div>
+      {"<button class=\"btn\" onclick=\"navigator.clipboard.writeText(document.getElementById('brain-url').innerText)\">Copy</button>" if not needs_guidance else ""}
     </div>
-    <div class="subtitle">The installer will try to find Harry Brain automatically. If it cannot, paste this address into the installer on another machine on your network.</div>
-    <div class="subtitle" style="margin-top:10px;">If this address is wrong for Docker or reverse-proxy installs, set <code>HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789</code> or <code>HARRY_BRAIN_LAN_IP=&lt;brain-ip&gt;</code> with <code>HARRY_PUBLIC_PORT=8789</code>.</div>
+    <div class="subtitle">The installer will try to find Harry Brain automatically. If it cannot, paste the LAN-reachable address into the installer on another machine on your network.</div>
+    <div class="subtitle" style="margin-top:10px;">If the automatic address is wrong, set <code>HARRY_PUBLIC_BASE_URL=http://192.168.1.100:8789</code> or <code>HARRY_BRAIN_LAN_IP=192.168.1.100</code> with <code>HARRY_PUBLIC_PORT=8789</code>.</div>
   </div>
 </section>
 
@@ -737,7 +741,7 @@ def downloads_page(request: Request) -> HTMLResponse:
     <div class="advrow">
       <div class="advleft">
         <div class="advnode">3. Enter the Brain address</div>
-        <div class="advmsg">When prompted by the installer, use <code>{html.escape(brain_url)}</code>. Do not use <code>localhost</code> unless installing on the Brain machine itself.</div>
+        <div class="advmsg">When prompted by the installer, use the LAN-reachable Brain address. Do not use <code>localhost</code> unless installing on the Brain machine itself.</div>
       </div>
     </div>
 
