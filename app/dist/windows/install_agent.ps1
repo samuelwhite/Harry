@@ -52,6 +52,17 @@ function Normalize-BrainUrl {
     return "${scheme}://${brainHost}:${port}"
 }
 
+function Get-DefaultBrainPort {
+    if ($env:HARRY_PUBLIC_PORT -match '^\d+$') {
+        $port = [int]$env:HARRY_PUBLIC_PORT
+        if ($port -ge 1 -and $port -le 65535) {
+            return $port
+        }
+    }
+
+    return 8789
+}
+
 function Get-FirstLocalIPv4 {
     try {
         $ips = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
@@ -71,6 +82,153 @@ function Get-FirstLocalIPv4 {
     }
 
     return $null
+}
+
+function Get-SubnetCandidates {
+    param (
+        [string]$Ip,
+        [int]$Port
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Ip)) {
+        return @()
+    }
+
+    if ($Ip -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+        return @()
+    }
+
+    if ($Ip -match '^127\.|^169\.254\.|^172\.(1[6-9]|2\d|3[0-1])\.|^192\.168\.240\.') {
+        return @()
+    }
+
+    $prefix = Get-SubnetPrefix3 -Ip $Ip
+    if (-not $prefix) {
+        return @()
+    }
+
+    $lastOctets = @(1, 2, 10, 20, 50, 100, 150, 200, 254)
+    $candidates = @()
+
+    foreach ($octet in $lastOctets) {
+        $candidate = "${prefix}.${octet}"
+        if ($candidate -ne $Ip) {
+            $candidates += "http://${candidate}:${Port}"
+        }
+    }
+
+    return $candidates
+}
+
+function Get-DiscoveryCandidates {
+    param (
+        [int]$Port
+    )
+
+    $candidates = New-Object System.Collections.Generic.List[string]
+    $seen = New-Object System.Collections.Generic.HashSet[string]
+
+    foreach ($seed in @("http://harry.local:$Port", "http://harry-brain.local:$Port")) {
+        if ($seen.Add($seed)) { [void]$candidates.Add($seed) }
+    }
+
+    $localIps = New-Object System.Collections.Generic.List[string]
+    try {
+        Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+            Where-Object {
+                $_.IPAddress -match '^\d+\.\d+\.\d+\.\d+$' -and
+                $_.IPAddress -notlike '127.*' -and
+                $_.IPAddress -notlike '169.254.*'
+            } |
+            ForEach-Object {
+                if ($seen.Add($_.IPAddress)) {
+                    [void]$localIps.Add($_.IPAddress)
+                }
+            }
+    } catch {
+    }
+
+    try {
+        Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
+            Select-Object -ExpandProperty NextHop |
+            ForEach-Object {
+                if ($_ -match '^\d+\.\d+\.\d+\.\d+$' -and $seen.Add($_)) {
+                    [void]$localIps.Add($_)
+                }
+            }
+    } catch {
+    }
+
+    try {
+        Get-NetNeighbor -ErrorAction Stop |
+            Where-Object {
+                $_.IPAddress -match '^\d+\.\d+\.\d+\.\d+$' -and
+                $_.IPAddress -notlike '127.*' -and
+                $_.IPAddress -notlike '169.254.*'
+            } |
+            ForEach-Object {
+                if ($seen.Add($_.IPAddress)) {
+                    [void]$localIps.Add($_.IPAddress)
+                }
+            }
+    } catch {
+    }
+
+    foreach ($ip in $localIps) {
+        foreach ($candidate in (Get-SubnetCandidates -Ip $ip -Port $Port)) {
+            if ($seen.Add($candidate)) {
+                [void]$candidates.Add($candidate)
+            }
+        }
+    }
+
+    return $candidates
+}
+
+function Test-BrainDiscoveryCandidate {
+    param (
+        [string]$BrainUrl
+    )
+
+    $base = "$BrainUrl".Trim().TrimEnd("/")
+    if ([string]::IsNullOrWhiteSpace($base)) {
+        return $null
+    }
+
+    foreach ($path in @("/discover", "/.well-known/harry-brain")) {
+        $url = "${base}${path}"
+        try {
+            $response = Invoke-WebRequest -Uri $url -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+            $payload = $response.Content | ConvertFrom-Json
+            if ($payload -and $payload.service -eq "harry-brain" -and $payload.ok -eq $true) {
+                if ($payload.base_url) {
+                    return ($payload.base_url).TrimEnd("/")
+                }
+                return $base
+            }
+        } catch {
+        }
+    }
+
+    return $null
+}
+
+function Discover-HarryBrain {
+    param (
+        [int]$Port
+    )
+
+    $found = New-Object System.Collections.Generic.List[string]
+    $seen = New-Object System.Collections.Generic.HashSet[string]
+
+    foreach ($candidate in (Get-DiscoveryCandidates -Port $Port)) {
+        $discovered = Test-BrainDiscoveryCandidate -BrainUrl $candidate
+        if ($discovered -and $seen.Add($discovered)) {
+            [void]$found.Add($discovered)
+        }
+    }
+
+    return $found
 }
 
 function Get-SubnetPrefix3 {
@@ -105,7 +263,7 @@ function Test-BrainReachability {
     $port = $uri.Port
 
     if ($port -lt 1) {
-        $port = 8787
+        $port = 8789
     }
 
     Write-Host ""
@@ -246,16 +404,85 @@ if (-not (Test-Path $ConfigPath)) {
     Write-Host "  http://192.168.1.100:8789"
     Write-Host ""
 
-    $defaultBrain = "http://harry-brain:8787"
-    $brainInput = Read-Host "Harry Brain address [$defaultBrain]"
+    $publicPort = Get-DefaultBrainPort
+    $discovered = Discover-HarryBrain -Port $publicPort
+    $brain = $null
 
-    if ([string]::IsNullOrWhiteSpace($brainInput)) {
-        $brainInput = $defaultBrain
+    if ($discovered.Count -eq 1) {
+        $brain = $discovered[0]
+        Write-Host "Auto-discovered Harry Brain: $brain"
+    } elseif ($discovered.Count -gt 1) {
+        if (-not (Test-IsAdmin)) {
+            Write-Host "Multiple Harry Brain instances were discovered, but the installer cannot prompt here." -ForegroundColor Yellow
+        }
+
+        Write-Host ""
+        Write-Host "Multiple Harry Brain instances were discovered:"
+        for ($i = 0; $i -lt $discovered.Count; $i++) {
+            Write-Host ("  {0}) {1}" -f ($i + 1), $discovered[$i])
+        }
+        Write-Host "  m) Enter a Brain address manually"
+        $choice = Read-Host "Choose a Brain [1]"
+        if ([string]::IsNullOrWhiteSpace($choice)) {
+            $choice = "1"
+        }
+
+        if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $discovered.Count) {
+            $brain = $discovered[[int]$choice - 1]
+        }
+    }
+
+    if (-not $brain) {
+        if (-not [Console]::IsInputRedirected) {
+            Write-Host ""
+            Write-Host "No Brain was auto-discovered."
+            Write-Host "Enter the Brain address that other machines can reach."
+            Write-Host "Examples:"
+            Write-Host "  192.168.1.100"
+            Write-Host "  192.168.1.100:8789"
+            Write-Host "  http://192.168.1.100:8789"
+            Write-Host ""
+            $brainInput = Read-Host "Harry Brain address"
+
+            if ([string]::IsNullOrWhiteSpace($brainInput)) {
+                Write-Host "ERROR: No Brain address provided." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }
+
+            try {
+                $brain = Normalize-BrainUrl $brainInput
+            } catch {
+                Write-Host ""
+                Write-Host "ERROR: Invalid Harry Brain address: $brainInput" -ForegroundColor Red
+                Write-Host ""
+                Read-Host "Press Enter to exit"
+                exit 1
+            }
+        } else {
+            Write-Host ""
+            Write-Host "ERROR: Harry Brain could not be auto-discovered in non-interactive mode." -ForegroundColor Red
+            Write-Host "Set the Brain address manually and rerun the installer." -ForegroundColor Yellow
+            exit 1
+        }
+    } else {
+        try {
+            $brain = Normalize-BrainUrl $brain
+        } catch {
+            Write-Host ""
+            Write-Host "ERROR: Invalid discovered Harry Brain address: $brain" -ForegroundColor Red
+            Write-Host ""
+            Read-Host "Press Enter to exit"
+            exit 1
+        }
     }
 
     try {
-        $brain = Normalize-BrainUrl $brainInput
-        Test-BrainReachability -BrainUrl $brain
+        $verified = Test-BrainDiscoveryCandidate -BrainUrl $brain
+        if (-not $verified) {
+            throw "Harry Brain did not advertise discovery metadata at $brain"
+        }
+        $brain = $verified
     } catch {
         Write-Host ""
         Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
