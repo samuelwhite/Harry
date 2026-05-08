@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -34,6 +35,15 @@ def _render_downloads(monkeypatch, tmp_path, *, base_url=None):
 
     with TestClient(main.app, **client_kwargs) as client:
         return client.get("/downloads").text
+
+
+def _make_request(host: str, scheme: str = "http"):
+    hostname, _, port_s = host.partition(":")
+    port = int(port_s) if port_s else None
+    return SimpleNamespace(
+        headers={"host": host},
+        url=SimpleNamespace(hostname=hostname, port=port, scheme=scheme),
+    )
 
 
 def test_validate_dist_agent_rejects_tabs(tmp_path):
@@ -129,6 +139,8 @@ def test_downloads_prefers_non_local_public_base_url(monkeypatch, tmp_path):
     html = _render_downloads(monkeypatch, tmp_path)
 
     assert 'id="brain-url">http://brain.example:8789<' in html
+    assert "On this machine only" not in html
+    assert "127.0.0.1" not in html
 
 
 def test_downloads_uses_placeholder_env_only_as_fallback(monkeypatch, tmp_path):
@@ -137,6 +149,7 @@ def test_downloads_uses_placeholder_env_only_as_fallback(monkeypatch, tmp_path):
     html = _render_downloads(monkeypatch, tmp_path)
 
     assert 'id="brain-url">http://192.168.1.44:8789<' in html
+    assert "127.0.0.1" not in html
 
 
 def test_downloads_ignores_container_bridge_public_base_url(monkeypatch, tmp_path):
@@ -154,26 +167,28 @@ def test_downloads_uses_harry_brain_lan_ip(monkeypatch, tmp_path):
     html = _render_downloads(monkeypatch, tmp_path)
 
     assert 'id="brain-url">http://192.168.1.88:8799<' in html
+    assert "127.0.0.1" not in html
 
 
-def test_downloads_never_uses_localhost_as_primary_address(monkeypatch, tmp_path):
-    monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://localhost:8789")
-    monkeypatch.setattr(router, "_detect_lan_ip", lambda: "192.168.1.44")
-    html = _render_downloads(monkeypatch, tmp_path, base_url="http://127.0.0.1:8789")
+def test_downloads_removes_local_only_block(monkeypatch, tmp_path):
+    monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://brain.example:8789")
+    html = _render_downloads(monkeypatch, tmp_path)
 
-    assert 'id="brain-url">http://192.168.1.44:8789<' in html
-    assert "Only works from this Brain machine." in html
-    assert "http://127.0.0.1:8789" in html
+    assert "On this machine only" not in html
+    assert "Only works from this Brain machine." not in html
+    assert "http://127.0.0.1:8789" not in html
 
 
-def test_downloads_uses_request_host_lan_ip(monkeypatch, tmp_path):
+def test_downloads_uses_request_host_lan_ip(monkeypatch):
     monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
     monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
     monkeypatch.delenv("HARRY_PORT", raising=False)
     monkeypatch.setattr(router, "_detect_lan_ip", lambda: None)
-    html = _render_downloads(monkeypatch, tmp_path, base_url="http://192.168.1.55:8787")
+    request = _make_request("192.168.1.55:8787", scheme="http")
+    public_url, local_url = router._resolve_brain_urls(request)
 
-    assert 'id="brain-url">http://192.168.1.55:8787<' in html
+    assert public_url == "http://192.168.1.55:8787"
+    assert local_url == "http://127.0.0.1:8787"
 
 
 def test_downloads_ignores_container_bridge_request_host(monkeypatch):
@@ -181,15 +196,7 @@ def test_downloads_ignores_container_bridge_request_host(monkeypatch):
     monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
     monkeypatch.delenv("HARRY_PORT", raising=False)
     monkeypatch.setattr(router, "_detect_lan_ip", lambda: None)
-
-    request = type(
-        "Req",
-        (),
-        {
-            "headers": {"host": "172.17.0.2:8787"},
-            "url": type("Url", (), {"hostname": "172.17.0.2", "port": 8787})(),
-        },
-    )()
+    request = _make_request("172.17.0.2:8787", scheme="http")
 
     public_url, local_url = router._resolve_brain_urls(request)
 
@@ -205,6 +212,31 @@ def test_downloads_uses_detected_lan_ip_with_default_public_port(monkeypatch, tm
     html = _render_downloads(monkeypatch, tmp_path)
 
     assert 'id="brain-url">http://192.168.1.77:8789<' in html
+    assert "127.0.0.1" not in html
+
+
+def test_downloads_domain_http_request_does_not_become_domain_port(monkeypatch):
+    monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
+    monkeypatch.delenv("HARRY_PORT", raising=False)
+    monkeypatch.setattr(router, "_detect_lan_ip", lambda: None)
+    request = _make_request("brain.example", scheme="http")
+
+    public_url, _ = router._resolve_brain_urls(request)
+
+    assert public_url == "http://<brain-ip>:8789"
+
+
+def test_downloads_https_domain_request_renders_https_domain(monkeypatch):
+    monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
+    monkeypatch.delenv("HARRY_PORT", raising=False)
+    monkeypatch.setattr(router, "_detect_lan_ip", lambda: None)
+    request = _make_request("brain.example", scheme="https")
+
+    public_url, _ = router._resolve_brain_urls(request)
+
+    assert public_url == "https://brain.example"
 
 
 def test_downloads_uses_placeholder_when_lan_ip_is_unavailable(monkeypatch, tmp_path):
@@ -216,3 +248,4 @@ def test_downloads_uses_placeholder_when_lan_ip_is_unavailable(monkeypatch, tmp_
 
     assert 'id="brain-url">http://&lt;brain-ip&gt;:8789<' in html
     assert "HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789" in html
+    assert "127.0.0.1" not in html

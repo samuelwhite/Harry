@@ -392,14 +392,32 @@ def _parse_authority(authority: str) -> tuple[str, int | None] | None:
     return host, parsed.port
 
 
-def _request_public_candidate(request: Request) -> tuple[str, int | None] | None:
+def _request_public_candidate(request: Request) -> tuple[str, str, int | None, bool] | None:
     host_header = (request.headers.get("host") or "").strip()
     candidate = _parse_authority(host_header)
-    if candidate and _host_is_publicly_usable(candidate[0]):
-        return candidate
+    scheme = (request.url.scheme or "http").strip().lower()
 
-    if request.url.hostname and _host_is_publicly_usable(request.url.hostname):
-        return request.url.hostname, request.url.port
+    if candidate:
+        host, port = candidate
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            if scheme == "https" and not _host_is_loopback(host):
+                return "https", host, None, True
+        else:
+            if _host_is_publicly_usable(host):
+                return scheme or "http", host, port, False
+
+    host = (request.url.hostname or "").strip()
+    if host:
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            if scheme == "https" and not _host_is_loopback(host):
+                return "https", host, None, True
+        else:
+            if _host_is_publicly_usable(host):
+                return scheme or "http", host, request.url.port, False
 
     return None
 
@@ -418,8 +436,8 @@ def _resolve_public_port(request: Request, configured: str, request_port: int | 
         return int(request_port)
 
     request_candidate = _request_public_candidate(request)
-    if request_candidate and request_candidate[1] is not None:
-        return int(request_candidate[1])
+    if request_candidate and request_candidate[2] is not None:
+        return int(request_candidate[2])
 
     return 8789
 
@@ -435,21 +453,22 @@ def _resolve_local_port(request: Request, configured: str, public_port: int) -> 
             return env_port
 
     request_candidate = _request_public_candidate(request)
-    if request_candidate and request_candidate[1] is not None:
-        return int(request_candidate[1])
+    if request_candidate and request_candidate[2] is not None:
+        return int(request_candidate[2])
 
     return public_port
 
 
-def _build_url(scheme: str, host: str, port: int) -> str:
-    return urlunsplit((scheme or "http", f"{host}:{port}", "", "", ""))
+def _build_url(scheme: str, host: str, port: int | None = None) -> str:
+    netloc = host if port is None else f"{host}:{port}"
+    return urlunsplit((scheme or "http", netloc, "", "", ""))
 
 
 def _resolve_brain_urls(request: Request) -> tuple[str, str]:
     configured = (os.environ.get("HARRY_PUBLIC_BASE_URL") or "").strip()
     brain_lan_ip = (os.environ.get("HARRY_BRAIN_LAN_IP") or "").strip()
     request_candidate = _request_public_candidate(request)
-    request_port = request_candidate[1] if request_candidate else None
+    request_port = request_candidate[2] if request_candidate else None
 
     public_port = _resolve_public_port(request, configured, request_port=request_port)
     local_port = _resolve_local_port(request, configured, public_port)
@@ -465,8 +484,11 @@ def _resolve_brain_urls(request: Request) -> tuple[str, str]:
         public_url = _build_url("http", brain_lan_ip, public_port)
 
     if not public_url and request_candidate:
-        host, port = request_candidate
-        public_url = _build_url("http", host, int(port or public_port))
+        scheme, host, port, https_domain = request_candidate
+        if https_domain:
+            public_url = _build_url("https", host, None)
+        else:
+            public_url = _build_url(scheme, host, int(port or public_port))
 
     if not public_url:
         lan_ip = _detect_lan_ip()
@@ -663,14 +685,7 @@ def downloads_page(request: Request) -> HTMLResponse:
       </button>
     </div>
     <div class="subtitle">Copy this full Brain address into the installer when prompted on another machine on your network. If the automatic address is wrong, set <code>HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789</code> or <code>HARRY_BRAIN_LAN_IP=&lt;brain-ip&gt;</code> with <code>HARRY_PUBLIC_PORT=8789</code>.</div>
-
-    <div style="height:12px;"></div>
-
-    <div class="k">On this machine only</div>
-    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      <div class="v"><code>{html.escape(local_url)}</code></div>
-    </div>
-    <div class="subtitle">Only works from this Brain machine.</div>
+    <div class="subtitle" style="margin-top:10px;">Use the address that other machines on your network can reach. For Docker installs, set <code>HARRY_PUBLIC_BASE_URL</code> or <code>HARRY_BRAIN_LAN_IP</code> if this is wrong.</div>
   </div>
 </section>
 
