@@ -11,6 +11,9 @@ __pycache__/
 venv/
 .env
 .env.*
+.pytest_cache/
+.pytest-tmp/
+tmp_pytest*/
 
 # ----------------------------
 # Build artefacts (REMOVE THESE)

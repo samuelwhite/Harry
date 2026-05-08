@@ -77,13 +77,18 @@ def test_render_shell_includes_page_eyebrow():
         active_page="fleet",
         page_title="Fleet",
         page_subtitle="Live status",
-        sidebar_sections=[],
+        sidebar_sections=[
+            {"label": "Fleet", "items": [{"label": "Overview", "href": "/"}]},
+            {"label": "Inventory", "items": [{"label": "Summary", "href": "/inventory"}]},
+        ],
         actions=[],
         content="",
     )
 
     assert "Fleet overview" in html
     assert '<div class="eyebrow">Fleet overview</div>' in html
+    assert 'class="topnav-link active"' in html
+    assert ">Overview</a>" in html
 
 
 def test_fleet_page_does_not_inject_full_page_refresh_script(monkeypatch):

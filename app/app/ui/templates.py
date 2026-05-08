@@ -7,16 +7,16 @@ from app.activity_feed import format_relative_ago
 
 CSS = """
 :root {
-  --bgA: #08101d;
-  --bgB: #091427;
-  --bgC: #07101c;
-  --panel: rgba(255,255,255,0.045);
-  --panel-strong: rgba(255,255,255,0.075);
-  --panel-soft: rgba(255,255,255,0.028);
-  --stroke: rgba(255,255,255,0.10);
-  --stroke-strong: rgba(255,255,255,0.16);
-  --text: rgba(255,255,255,0.92);
-  --muted: rgba(255,255,255,0.62);
+  --bgA: #0b1320;
+  --bgB: #101927;
+  --bgC: #172131;
+  --panel: rgba(255,255,255,0.055);
+  --panel-strong: rgba(255,255,255,0.085);
+  --panel-soft: rgba(255,255,255,0.03);
+  --stroke: rgba(210,223,243,0.11);
+  --stroke-strong: rgba(226,237,255,0.18);
+  --text: rgba(245,248,252,0.96);
+  --muted: rgba(208,220,237,0.66);
 
   --ok: #34d399;
   --info: #60a5fa;
@@ -24,9 +24,8 @@ CSS = """
   --bad: #fb7185;
   --stale: #fb7185;
 
-  --sidebar-w: 280px;
-  --radius: 18px;
-  --shadow: 0 18px 50px rgba(0,0,0,0.35);
+  --radius: 20px;
+  --shadow: 0 22px 60px rgba(3,8,18,0.30);
 }
 
 * { box-sizing: border-box; }
@@ -41,12 +40,12 @@ html, body {
 
 body {
   min-height: 100vh;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", sans-serif;
   background:
-    radial-gradient(920px 720px at 16% 16%, rgba(88,120,255,0.16), rgba(10,18,32,0.0) 60%),
-    radial-gradient(840px 640px at 84% 12%, rgba(84,200,255,0.10), rgba(10,18,32,0.0) 54%),
-    radial-gradient(860px 680px at 55% 92%, rgba(124,92,255,0.10), rgba(10,18,32,0.0) 56%),
-    linear-gradient(180deg, var(--bgB) 0%, var(--bgA) 48%, #050914 100%);
+    radial-gradient(920px 720px at 10% 10%, rgba(94,122,168,0.20), rgba(10,18,32,0.0) 60%),
+    radial-gradient(840px 640px at 88% 14%, rgba(71,120,178,0.13), rgba(10,18,32,0.0) 54%),
+    radial-gradient(860px 680px at 52% 92%, rgba(48,84,128,0.11), rgba(10,18,32,0.0) 56%),
+    linear-gradient(180deg, var(--bgC) 0%, var(--bgB) 42%, #09111b 100%);
   background-attachment: fixed;
   color: var(--text);
 }
@@ -62,141 +61,156 @@ input[type="button"] {
 
 .shell {
   min-height: 100vh;
-  display: grid;
-  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  padding: 18px;
 }
 
-.sidebar {
+.main {
+  min-width: 0;
+}
+
+.main-inner {
+  width: 100%;
+  max-width: 1380px;
+  margin: 0 auto;
+}
+
+.appheader {
   position: sticky;
   top: 0;
-  height: 100vh;
-  overflow-y: auto;
-  padding: 20px 16px 20px 20px;
-  border-right: 1px solid rgba(255,255,255,0.08);
-  background: linear-gradient(180deg, rgba(8,14,28,0.92), rgba(8,14,28,0.72));
-  backdrop-filter: blur(10px);
-}
-
-.sidebar-inner {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.brand {
-  padding: 14px 14px 12px;
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 18px;
-  background: rgba(255,255,255,0.05);
+  z-index: 20;
+  margin-bottom: 18px;
+  border: 1px solid var(--stroke);
+  border-radius: 28px;
+  background: rgba(12,19,30,0.76);
   box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+  overflow: hidden;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.brandblock {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.brandmark {
+  width: 44px;
+  height: 44px;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255,255,255,0.26), transparent 42%),
+    linear-gradient(145deg, rgba(124,154,196,0.92), rgba(53,89,132,0.92));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,0.96);
+  font-size: 14px;
+  font-weight: 950;
+  letter-spacing: 0.18em;
+  box-shadow: 0 12px 28px rgba(30,56,92,0.30);
+}
+
+.brandcopy {
+  min-width: 0;
 }
 
 .brand-title {
-  font-size: 1.25rem;
+  font-size: 1.08rem;
   font-weight: 950;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.08em;
 }
 
 .brand-sub {
-  margin-top: 6px;
+  margin-top: 4px;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.4;
 }
 
-.sidebar-group {
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 18px;
-  background: rgba(255,255,255,0.035);
-  padding: 12px;
-}
-
-.sidebar-label {
-  font-size: 12px;
-  color: rgba(255,255,255,0.66);
-  font-weight: 900;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  margin-bottom: 10px;
-}
-
-.sidebar-links {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.sidebar-link {
+.topbar-right {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 40px;
-  padding: 10px 12px;
-  border-radius: 12px;
+}
+
+.versionchip {
+  padding: 9px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.09);
+  background: rgba(255,255,255,0.04);
+  color: rgba(230,237,247,0.82);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.topnav {
+  display: flex;
+  gap: 10px;
+  padding: 0 20px 14px;
+  flex-wrap: wrap;
+}
+
+.topnav-link,
+.sectionnav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 10px 14px;
+  border-radius: 14px;
   border: 1px solid transparent;
-  color: rgba(255,255,255,0.90);
+  color: rgba(232,239,249,0.88);
   font-size: 14px;
   font-weight: 800;
-  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
 
-.sidebar-link:hover {
+.topnav-link:hover,
+.sectionnav-link:hover {
   text-decoration: none;
-  background: rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.08);
+}
+
+.topnav-link.active {
+  background: rgba(255,255,255,0.10);
   border-color: rgba(255,255,255,0.10);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
 }
 
-.sidebar-link.active {
-  background: rgba(255,255,255,0.09);
-  border-color: rgba(255,255,255,0.10);
-  box-shadow: none;
-}
-
-.sidebar-link.sub {
-  color: rgba(255,255,255,0.78);
-  font-size: 13px;
-  font-weight: 700;
-  padding-left: 18px;
-}
-
-.sidebar-meta {
-  margin-top: auto;
-  padding: 12px;
-  color: rgba(255,255,255,0.58);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.main {
-  min-width: 0;
-  padding: 18px;
-}
-
-.main-inner {
-  width: 100%;
-  max-width: 1320px;
-  margin: 0 auto;
-}
-
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
+.hero {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 18px;
-  padding: 16px 18px;
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 22px;
-  background: rgba(11,18,32,0.78);
-  box-shadow: 0 18px 42px rgba(0,0,0,0.28);
-  backdrop-filter: blur(10px);
+  gap: 18px;
+  align-items: flex-end;
+  padding: 18px 20px 20px;
 }
 
-.topbar-left {
+.hero-left {
   min-width: 0;
+}
+
+.hero-right {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.sectionnav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
 }
 
 .eyebrow {
@@ -223,12 +237,6 @@ input[type="button"] {
   display: flex;
   gap: 8px 12px;
   flex-wrap: wrap;
-}
-
-.topbar-right {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
 }
 
 .menuwrap {
@@ -878,22 +886,20 @@ table.inv {
 
 .timelineitem {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(88px, 108px) 24px minmax(0, 1fr) auto;
   gap: 12px;
-  align-items: flex-start;
+  align-items: center;
   padding: 14px 0;
   border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
 .timelineitem:last-child { border-bottom: none; }
 
-.timelinelead {
+.timelinedotwrap,
+.timelinebadgewrap {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  min-width: 72px;
-  padding-top: 2px;
+  justify-content: center;
 }
 
 .timelinedot {
@@ -914,7 +920,8 @@ table.inv {
   color: rgba(255,255,255,0.52);
   font-size: 12px;
   font-weight: 700;
-  text-align: center;
+  text-align: left;
+  white-space: nowrap;
 }
 
 .timelinebody {
@@ -937,11 +944,10 @@ table.inv {
 
 .timelinebadge {
   margin: 0;
-  align-self: center;
   font-size: 10.5px;
   padding: 4px 8px;
   letter-spacing: 0.25px;
-  opacity: 0.82;
+  opacity: 0.72;
 }
 
 .activitystate {
@@ -1178,24 +1184,7 @@ svg a { cursor: pointer; pointer-events: auto; }
 svg text { pointer-events: auto; }
 
 @media (max-width: 1180px) {
-  .shell {
-    grid-template-columns: 1fr;
-  }
-
-  .sidebar {
-    position: relative;
-    top: auto;
-    height: auto;
-    border-right: none;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-    padding: 14px;
-  }
-
-  .main {
-    padding-top: 14px;
-  }
-
-  .topbar {
+  .appheader {
     position: relative;
     top: auto;
   }
@@ -1238,17 +1227,35 @@ svg text { pointer-events: auto; }
 }
 
 @media (max-width: 720px) {
-  .main {
+  .shell {
     padding: 10px;
   }
 
   .topbar {
-    flex-direction: column;
-    align-items: stretch;
+    flex-wrap: wrap;
+    padding: 14px;
   }
 
   .topbar-right {
     justify-content: flex-end;
+    width: 100%;
+  }
+
+  .topnav,
+  .hero {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .hero {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero-right {
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
   }
 
   .topwarn {
@@ -1318,6 +1325,35 @@ svg text { pointer-events: auto; }
     width: 100%;
     justify-content: space-between;
   }
+
+  .timelineitem {
+    grid-template-columns: 1fr auto;
+    gap: 8px 12px;
+    align-items: flex-start;
+  }
+
+  .timelineage {
+    grid-column: 1 / 2;
+    order: 1;
+  }
+
+  .timelinebadgewrap {
+    grid-column: 2 / 3;
+    grid-row: 1 / 2;
+    justify-content: flex-end;
+    order: 2;
+  }
+
+  .timelinedotwrap {
+    grid-column: 1 / 2;
+    justify-content: flex-start;
+    order: 3;
+  }
+
+  .timelinebody {
+    grid-column: 1 / 3;
+    order: 4;
+  }
 }
 
 @media (max-width: 480px) {
@@ -1354,6 +1390,12 @@ svg text { pointer-events: auto; }
     left: 0;
     right: 0;
     min-width: 0;
+  }
+
+  .topnav-link,
+  .sectionnav-link {
+    width: 100%;
+    justify-content: center;
   }
 }
 """
@@ -1469,6 +1511,9 @@ def _html_escape(s: str) -> str:
         .replace("'", "&#39;")
     )
 
+def _safe_str(value: object) -> str:
+    return "" if value is None else str(value)
+
 def _safe_dom_id(s: str) -> str:
     out = []
     for ch in (s or ""):
@@ -1534,38 +1579,61 @@ def page_html(title: str, body: str, extra_js: str = "") -> str:
 </html>
 """
 
-def _render_sidebar(sidebar_sections: list[dict], active_page: str) -> str:
-    groups = []
+def _top_nav_label(section_label: str) -> str:
+    label = (section_label or "").strip().lower()
+    if label == "fleet":
+        return "Overview"
+    return (section_label or "").strip() or "Section"
+
+
+def _top_nav_page(active_page: str) -> str:
+    page = (active_page or "").strip().lower()
+    return "fleet" if page == "node" else page
+
+
+def _render_top_nav(sidebar_sections: list[dict], active_page: str) -> str:
+    links: list[str] = []
+    nav_page = _top_nav_page(active_page)
 
     for section in sidebar_sections:
-        label = _html_escape(section.get("label") or "")
         items = section.get("items") or []
+        first = items[0] if items else {}
+        href = _html_escape(first.get("href") or "#")
+        page = _safe_str(first.get("page") or section.get("page") or "").strip().lower()
+        if not page:
+            label_key = _safe_str(section.get("label") or "").strip().lower()
+            page = "fleet" if label_key == "fleet" else label_key
+        cls = "topnav-link"
+        if page == nav_page:
+            cls += " active"
+        links.append(f'<a class="{cls}" href="{href}">{_html_escape(_top_nav_label(section.get("label") or ""))}</a>')
+
+    return "".join(links)
+
+
+def _render_section_nav(sidebar_sections: list[dict], active_page: str) -> str:
+    nav_page = _top_nav_page(active_page)
+
+    for section in sidebar_sections:
+        items = section.get("items") or []
+        section_page = _safe_str(section.get("page") or "").strip().lower()
+        if not section_page:
+            label_key = _safe_str(section.get("label") or "").strip().lower()
+            section_page = "fleet" if label_key == "fleet" else label_key
+        if section_page != nav_page:
+            continue
+
         links = []
-
-        for item in items:
-            item_label = _html_escape(item.get("label") or "")
+        for idx, item in enumerate(items):
             href = _html_escape(item.get("href") or "#")
-            is_active = bool(item.get("active")) or (item.get("page") == active_page)
-            is_sub = bool(item.get("sub"))
-            cls = "sidebar-link"
-            if is_sub:
-                cls += " sub"
-            if is_active:
+            label = _html_escape(item.get("label") or f"Section {idx + 1}")
+            cls = "sectionnav-link"
+            if idx == 0:
                 cls += " active"
-            links.append(f'<a class="{cls}" href="{href}">{item_label}</a>')
+            links.append(f'<a class="{cls}" href="{href}">{label}</a>')
+        return "".join(links)
 
-        groups.append(
-            f"""
-<div class="sidebar-group">
-  <div class="sidebar-label">{label}</div>
-  <div class="sidebar-links">
-    {''.join(links)}
-  </div>
-</div>
-"""
-        )
-
-    return "".join(groups)
+    return ""
 
 def _render_actions(actions: list[dict]) -> str:
     if not actions:
@@ -1603,35 +1671,36 @@ def render_shell(
     sidebar_footer: str = "",
 ) -> str:
     eyebrow = _page_eyebrow(active_page)
+    top_nav = _render_top_nav(sidebar_sections, active_page=active_page)
+    section_nav = _render_section_nav(sidebar_sections, active_page=active_page)
     body = f"""
 <div class="shell">
-  <aside class="sidebar">
-    <div class="sidebar-inner">
-      <div class="brand">
-        <div class="brand-title">HARRY</div>
-        <div class="brand-sub">Hardware review buddy</div>
-      </div>
-
-      {_render_sidebar(sidebar_sections, active_page=active_page)}
-
-      <div class="sidebar-meta">
-        Quiet infrastructure.<br/>
-        Clear signals.
-        {f'<div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08);">{sidebar_footer}</div>' if sidebar_footer else ''}
-      </div>
-    </div>
-  </aside>
-
   <main class="main">
     <div class="main-inner">
-      <div class="topbar">
-        <div class="topbar-left">
-          <div class="eyebrow">{_html_escape(eyebrow)}</div>
-          <div class="h1">{_html_escape(page_title)}</div>
-          <div class="sub">{page_subtitle}</div>
+      <div class="appheader">
+        <div class="topbar">
+          <div class="brandblock">
+            <div class="brandmark">HR</div>
+            <div class="brandcopy">
+              <div class="brand-title">HARRY</div>
+              <div class="brand-sub">White Family platform operations</div>
+            </div>
+          </div>
+          <div class="topbar-right">
+            {f'<div class="versionchip">{sidebar_footer}</div>' if sidebar_footer else ''}
+            {_render_actions(actions)}
+          </div>
         </div>
-        <div class="topbar-right">
-          {_render_actions(actions)}
+        <div class="topnav">
+          {top_nav}
+        </div>
+        <div class="hero">
+          <div class="hero-left">
+            <div class="eyebrow">{_html_escape(eyebrow)}</div>
+            <div class="h1">{_html_escape(page_title)}</div>
+            <div class="sub">{page_subtitle}</div>
+            {f'<div class="sectionnav">{section_nav}</div>' if section_nav else ''}
+          </div>
         </div>
       </div>
 
