@@ -8,7 +8,7 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import (
@@ -271,25 +271,118 @@ def _resolve_port(request: Request) -> int:
     return 80
 
 
+def _host_is_loopback(host: str) -> bool:
+    host = (host or "").strip().lower()
+    if not host:
+        return False
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return True
+
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _safe_port(value: str | None) -> int | None:
+    try:
+        if value in (None, ""):
+            return None
+        port = int(str(value).strip())
+        if 1 <= port <= 65535:
+            return port
+    except Exception:
+        return None
+    return None
+
+
+def _parse_url_bits(url: str) -> tuple[str, str, int | None] | None:
+    raw = (url or "").strip()
+    if not raw:
+        return None
+
+    try:
+        parsed = urlsplit(raw)
+    except Exception:
+        return None
+
+    host = (parsed.hostname or "").strip()
+    if not host:
+        return None
+
+    return (parsed.scheme or "http", host, parsed.port)
+
+
+def _request_explicit_port(request: Request) -> int | None:
+    host_header = (request.headers.get("host") or "").strip()
+    if host_header and ":" in host_header:
+        maybe_port = host_header.rsplit(":", 1)[-1].strip("]")
+        return _safe_port(maybe_port)
+
+    if request.url.port:
+        return int(request.url.port)
+
+    return None
+
+
+def _resolve_public_port(request: Request, configured: str) -> int:
+    parsed = _parse_url_bits(configured)
+    if parsed and parsed[2] is not None and not _host_is_loopback(parsed[1]):
+        return int(parsed[2])
+
+    for env_name in ("HARRY_PUBLIC_PORT",):
+        env_port = _safe_port(os.environ.get(env_name))
+        if env_port is not None:
+            return env_port
+
+    explicit_request_port = _request_explicit_port(request)
+    if explicit_request_port is not None and not _host_is_loopback(request.url.hostname or ""):
+        return explicit_request_port
+
+    return 8789
+
+
+def _resolve_local_port(request: Request, configured: str, public_port: int) -> int:
+    parsed = _parse_url_bits(configured)
+    if parsed and parsed[2] is not None and _host_is_loopback(parsed[1]):
+        return int(parsed[2])
+
+    for env_name in ("HARRY_LOCAL_PORT", "HARRY_PUBLIC_PORT", "HARRY_PORT"):
+        env_port = _safe_port(os.environ.get(env_name))
+        if env_port is not None:
+            return env_port
+
+    explicit_request_port = _request_explicit_port(request)
+    if explicit_request_port is not None:
+        return explicit_request_port
+
+    return public_port
+
+
+def _build_url(scheme: str, host: str, port: int) -> str:
+    return urlunsplit((scheme or "http", f"{host}:{port}", "", "", ""))
+
+
 def _resolve_brain_urls(request: Request) -> tuple[str, str]:
     configured = (os.environ.get("HARRY_PUBLIC_BASE_URL") or "").strip()
+    public_port = _resolve_public_port(request, configured)
+    local_port = _resolve_local_port(request, configured, public_port)
+
+    public_url = ""
     if configured:
-        public_url = configured.rstrip("/")
-    else:
-        port = _resolve_port(request)
+        parsed = _parse_url_bits(configured)
+        if parsed and not _host_is_loopback(parsed[1]):
+            scheme, host, port = parsed
+            public_url = _build_url(scheme, host, int(port or public_port))
 
-        host = (request.url.hostname or "").strip().lower()
-        if host and host not in ("127.0.0.1", "localhost"):
-            public_url = f"{request.url.scheme}://{host}:{port}"
+    if not public_url:
+        lan_ip = _detect_lan_ip()
+        if lan_ip:
+            public_url = _build_url("http", lan_ip, public_port)
         else:
-            lan_ip = _detect_lan_ip()
-            if lan_ip:
-                public_url = f"http://{lan_ip}:{port}"
-            else:
-                public_url = f"http://127.0.0.1:{port}"
+            public_url = _build_url("http", "<brain-ip>", public_port)
 
-    local_port = _resolve_port(request)
-    local_url = f"http://127.0.0.1:{local_port}"
+    local_url = _build_url("http", "127.0.0.1", local_port)
     return public_url, local_url
 
 
@@ -478,7 +571,7 @@ def downloads_page(request: Request) -> HTMLResponse:
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <div class="v"><code>{html.escape(local_url)}</code></div>
     </div>
-    <div class="subtitle">This local address only works on the Brain machine itself.</div>
+    <div class="subtitle">Only works from this Brain machine.</div>
   </div>
 </section>
 
@@ -528,6 +621,13 @@ def downloads_page(request: Request) -> HTMLResponse:
         <div class="advmsg">After installation, return to Fleet and check that the new machine appears.</div>
       </div>
     </div>
+
+    <div class="advrow">
+      <div class="advleft">
+        <div class="advnode">5. Brain machine local agent</div>
+        <div class="advmsg">Harry Brain and the local Harry Agent are separate. If this Brain machine does not appear in Overview, install or check the local Harry Agent service.</div>
+      </div>
+    </div>
   </div>
 
   <div class="footerline">
@@ -547,6 +647,13 @@ def downloads_page(request: Request) -> HTMLResponse:
   </div>
 
   <div class="card">
+    <div class="advrow">
+      <div class="advleft">
+        <div class="advnode">Future automatic discovery</div>
+        <div class="advmsg">TODO: add mDNS / Bonjour discovery, consider a <code>harry.local</code> fallback, and keep manual IP entry available when discovery is unavailable.</div>
+      </div>
+    </div>
+
     <div class="advrow">
       <div class="advleft">
         <div class="advnode">1. Open Command Prompt</div>

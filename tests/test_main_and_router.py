@@ -4,12 +4,24 @@ from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
+import app.config as config
 import app.main as main
 import importlib
+from app.ui import db as dbmod
 from app.ui.templates import render_shell
 
 router = importlib.import_module("app.ui.router")
+
+
+def _setup_temp_db(monkeypatch, tmp_path):
+    db_path = tmp_path / "harry.db"
+    monkeypatch.setattr(config, "DB_PATH", db_path, raising=False)
+    monkeypatch.setattr(main, "DB_PATH", db_path, raising=False)
+    monkeypatch.setattr(dbmod, "DB_PATH", str(db_path), raising=False)
+    main._init_db()
+    return db_path
 
 
 def test_validate_dist_agent_rejects_tabs(tmp_path):
@@ -98,3 +110,57 @@ def test_fleet_page_does_not_inject_full_page_refresh_script(monkeypatch):
 
     assert "/fleet/partial" not in fleet_html
     assert "refreshFleet" not in fleet_html
+
+
+def test_downloads_prefers_non_local_public_base_url(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://brain.example:8789")
+    monkeypatch.setattr(router, "_downloads_dir", lambda: tmp_path)
+
+    with TestClient(main.app) as client:
+        html = client.get("/downloads").text
+
+    assert 'id="brain-url">http://brain.example:8789<' in html
+
+
+def test_downloads_does_not_show_localhost_as_other_machines_address(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://localhost:8789")
+    monkeypatch.setattr(router, "_detect_lan_ip", lambda: "192.168.1.44")
+    monkeypatch.setattr(router, "_downloads_dir", lambda: tmp_path)
+
+    with TestClient(main.app) as client:
+        html = client.get("/downloads").text
+
+    assert 'id="brain-url">http://192.168.1.44:8789<' in html
+    assert "Only works from this Brain machine." in html
+    assert "http://127.0.0.1:8789" in html
+
+
+def test_downloads_uses_detected_lan_ip_with_default_public_port(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+    monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
+    monkeypatch.delenv("HARRY_PORT", raising=False)
+    monkeypatch.setattr(router, "_detect_lan_ip", lambda: "192.168.1.77")
+    monkeypatch.setattr(router, "_downloads_dir", lambda: tmp_path)
+
+    with TestClient(main.app) as client:
+        html = client.get("/downloads").text
+
+    assert 'id="brain-url">http://192.168.1.77:8789<' in html
+
+
+def test_downloads_uses_placeholder_when_lan_ip_is_unavailable(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+    monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
+    monkeypatch.delenv("HARRY_PORT", raising=False)
+    monkeypatch.setattr(router, "_detect_lan_ip", lambda: None)
+    monkeypatch.setattr(router, "_downloads_dir", lambda: tmp_path)
+
+    with TestClient(main.app) as client:
+        html = client.get("/downloads").text
+
+    assert 'id="brain-url">http://&lt;brain-ip&gt;:8789<' in html
+    assert "HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789" in html
