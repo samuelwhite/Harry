@@ -60,6 +60,12 @@ def _is_usable_private_ipv4(ip: str) -> bool:
         return False
     if not addr.is_private:
         return False
+    if addr in ipaddress.ip_network("172.16.0.0/12"):
+        return False
+    if addr in ipaddress.ip_network("192.168.240.0/20"):
+        return False
+    if addr in ipaddress.ip_network("169.254.0.0/16"):
+        return False
 
     return True
 
@@ -339,6 +345,12 @@ def _host_is_publicly_usable(host: str) -> bool:
     if addr.is_link_local or addr.is_unspecified or addr.is_loopback:
         return False
     if not addr.is_private:
+        return False
+    if addr in ipaddress.ip_network("172.16.0.0/12"):
+        return False
+    if addr in ipaddress.ip_network("192.168.240.0/20"):
+        return False
+    if addr in ipaddress.ip_network("169.254.0.0/16"):
         return False
     if _host_is_container_bridge(host):
         return False
