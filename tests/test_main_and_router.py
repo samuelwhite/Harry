@@ -230,6 +230,7 @@ def test_downloads_removes_local_only_block(monkeypatch, tmp_path):
     monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://brain.example:8789")
     html = _render_downloads(monkeypatch, tmp_path)
 
+    assert "The installer will try to find Harry Brain automatically." in html
     assert "On this machine only" not in html
     assert "Only works from this Brain machine." not in html
     assert "http://127.0.0.1:8789" not in html

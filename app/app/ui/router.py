@@ -595,7 +595,7 @@ def ui_health() -> PlainTextResponse:
 
 @router.get("/downloads", response_class=HTMLResponse)
 def downloads_page(request: Request) -> HTMLResponse:
-    brain_url, local_url = _resolve_brain_urls(request)
+    brain_url, _local_url = _resolve_brain_urls(request)
     warning = _brain_url_warning(brain_url)
     downloads_dir = _downloads_dir()
 
@@ -689,15 +689,15 @@ def downloads_page(request: Request) -> HTMLResponse:
 
 <section class="section" id="downloads-overview">
   <div class="card">
-    <div class="k">Brain address for other machines</div>
+    <div class="k">Recommended Brain address</div>
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <div class="v big"><code id="brain-url">{html.escape(brain_url)}</code></div>
       <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('brain-url').innerText)">
         Copy
       </button>
     </div>
-    <div class="subtitle">Copy this full Brain address into the installer when prompted on another machine on your network. If the automatic address is wrong, set <code>HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789</code> or <code>HARRY_BRAIN_LAN_IP=&lt;brain-ip&gt;</code> with <code>HARRY_PUBLIC_PORT=8789</code>.</div>
-    <div class="subtitle" style="margin-top:10px;">Use the address that other machines on your network can reach. For Docker installs, set <code>HARRY_PUBLIC_BASE_URL</code> or <code>HARRY_BRAIN_LAN_IP</code> if this is wrong.</div>
+    <div class="subtitle">The installer will try to find Harry Brain automatically. If it cannot, paste this address into the installer on another machine on your network.</div>
+    <div class="subtitle" style="margin-top:10px;">If this address is wrong for Docker or reverse-proxy installs, set <code>HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789</code> or <code>HARRY_BRAIN_LAN_IP=&lt;brain-ip&gt;</code> with <code>HARRY_PUBLIC_PORT=8789</code>.</div>
   </div>
 </section>
 
