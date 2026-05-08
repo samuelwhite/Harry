@@ -284,6 +284,68 @@ def _host_is_loopback(host: str) -> bool:
         return False
 
 
+def _is_placeholder_brain_address(url: str) -> bool:
+    lowered = (url or "").strip().lower()
+    if not lowered:
+        return False
+    return (
+        "__harry_public_base_url__" in lowered
+        or "<brain-ip>" in lowered
+        or "brain-ip" in lowered
+        or "<" in lowered
+        or ">" in lowered
+    )
+
+
+def _host_is_container_bridge(host: str) -> bool:
+    host = (host or "").strip()
+    if not host:
+        return False
+
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+
+    if addr.version != 4:
+        return False
+
+    try:
+        return addr in ipaddress.ip_network("172.16.0.0/12")
+    except ValueError:
+        return False
+
+
+def _host_is_publicly_usable(host: str) -> bool:
+    host = (host or "").strip()
+    if not host:
+        return False
+
+    lowered = host.lower()
+    if lowered in ("localhost", "127.0.0.1", "::1", "testserver"):
+        return False
+    if "<" in lowered or ">" in lowered:
+        return False
+    if _host_is_loopback(host):
+        return False
+
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return True
+
+    if addr.version != 4:
+        return False
+    if addr.is_link_local or addr.is_unspecified or addr.is_loopback:
+        return False
+    if not addr.is_private:
+        return False
+    if _host_is_container_bridge(host):
+        return False
+
+    return True
+
+
 def _safe_port(value: str | None) -> int | None:
     try:
         if value in (None, ""):
@@ -313,21 +375,38 @@ def _parse_url_bits(url: str) -> tuple[str, str, int | None] | None:
     return (parsed.scheme or "http", host, parsed.port)
 
 
-def _request_explicit_port(request: Request) -> int | None:
-    host_header = (request.headers.get("host") or "").strip()
-    if host_header and ":" in host_header:
-        maybe_port = host_header.rsplit(":", 1)[-1].strip("]")
-        return _safe_port(maybe_port)
+def _parse_authority(authority: str) -> tuple[str, int | None] | None:
+    raw = (authority or "").strip()
+    if not raw:
+        return None
 
-    if request.url.port:
-        return int(request.url.port)
+    try:
+        parsed = urlsplit(f"//{raw}", scheme="http")
+    except Exception:
+        return None
+
+    host = (parsed.hostname or "").strip()
+    if not host:
+        return None
+
+    return host, parsed.port
+
+
+def _request_public_candidate(request: Request) -> tuple[str, int | None] | None:
+    host_header = (request.headers.get("host") or "").strip()
+    candidate = _parse_authority(host_header)
+    if candidate and _host_is_publicly_usable(candidate[0]):
+        return candidate
+
+    if request.url.hostname and _host_is_publicly_usable(request.url.hostname):
+        return request.url.hostname, request.url.port
 
     return None
 
 
-def _resolve_public_port(request: Request, configured: str) -> int:
+def _resolve_public_port(request: Request, configured: str, request_port: int | None = None) -> int:
     parsed = _parse_url_bits(configured)
-    if parsed and parsed[2] is not None and not _host_is_loopback(parsed[1]):
+    if parsed and parsed[2] is not None and _host_is_publicly_usable(parsed[1]):
         return int(parsed[2])
 
     for env_name in ("HARRY_PUBLIC_PORT",):
@@ -335,9 +414,12 @@ def _resolve_public_port(request: Request, configured: str) -> int:
         if env_port is not None:
             return env_port
 
-    explicit_request_port = _request_explicit_port(request)
-    if explicit_request_port is not None and not _host_is_loopback(request.url.hostname or ""):
-        return explicit_request_port
+    if request_port is not None:
+        return int(request_port)
+
+    request_candidate = _request_public_candidate(request)
+    if request_candidate and request_candidate[1] is not None:
+        return int(request_candidate[1])
 
     return 8789
 
@@ -352,9 +434,9 @@ def _resolve_local_port(request: Request, configured: str, public_port: int) -> 
         if env_port is not None:
             return env_port
 
-    explicit_request_port = _request_explicit_port(request)
-    if explicit_request_port is not None:
-        return explicit_request_port
+    request_candidate = _request_public_candidate(request)
+    if request_candidate and request_candidate[1] is not None:
+        return int(request_candidate[1])
 
     return public_port
 
@@ -365,22 +447,37 @@ def _build_url(scheme: str, host: str, port: int) -> str:
 
 def _resolve_brain_urls(request: Request) -> tuple[str, str]:
     configured = (os.environ.get("HARRY_PUBLIC_BASE_URL") or "").strip()
-    public_port = _resolve_public_port(request, configured)
+    brain_lan_ip = (os.environ.get("HARRY_BRAIN_LAN_IP") or "").strip()
+    request_candidate = _request_public_candidate(request)
+    request_port = request_candidate[1] if request_candidate else None
+
+    public_port = _resolve_public_port(request, configured, request_port=request_port)
     local_port = _resolve_local_port(request, configured, public_port)
 
     public_url = ""
-    if configured:
+    if configured and not _is_placeholder_brain_address(configured):
         parsed = _parse_url_bits(configured)
-        if parsed and not _host_is_loopback(parsed[1]):
+        if parsed and _host_is_publicly_usable(parsed[1]):
             scheme, host, port = parsed
             public_url = _build_url(scheme, host, int(port or public_port))
+
+    if not public_url and brain_lan_ip and not _is_placeholder_brain_address(brain_lan_ip) and not _host_is_loopback(brain_lan_ip):
+        public_url = _build_url("http", brain_lan_ip, public_port)
+
+    if not public_url and request_candidate:
+        host, port = request_candidate
+        public_url = _build_url("http", host, int(port or public_port))
 
     if not public_url:
         lan_ip = _detect_lan_ip()
         if lan_ip:
-            public_url = _build_url("http", lan_ip, public_port)
+            if _host_is_publicly_usable(lan_ip):
+                public_url = _build_url("http", lan_ip, public_port)
         else:
             public_url = _build_url("http", "<brain-ip>", public_port)
+
+    if not public_url:
+        public_url = _build_url("http", "<brain-ip>", public_port)
 
     local_url = _build_url("http", "127.0.0.1", local_port)
     return public_url, local_url
@@ -545,7 +642,9 @@ def downloads_page(request: Request) -> HTMLResponse:
     <div class="subtitle" style="margin-top:10px;">
       On Windows, open <code>Command Prompt</code>, run <code>ipconfig</code>,
       find your active adapter's <code>IPv4 Address</code>, then use
-      <code>HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789</code> for the address your agents should reach.
+      <code>HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789</code> or
+      <code>HARRY_BRAIN_LAN_IP=&lt;brain-ip&gt;</code> with
+      <code>HARRY_PUBLIC_PORT=8789</code> for the address your agents should reach.
     </div>
   </div>
 </section>
@@ -563,7 +662,7 @@ def downloads_page(request: Request) -> HTMLResponse:
         Copy
       </button>
     </div>
-    <div class="subtitle">Copy this full Brain address into the installer when prompted on another machine on your network. If needed, set <code>HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789</code> so agents use the correct external address.</div>
+    <div class="subtitle">Copy this full Brain address into the installer when prompted on another machine on your network. If the automatic address is wrong, set <code>HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789</code> or <code>HARRY_BRAIN_LAN_IP=&lt;brain-ip&gt;</code> with <code>HARRY_PUBLIC_PORT=8789</code>.</div>
 
     <div style="height:12px;"></div>
 

@@ -4,3 +4,7 @@ services:
       - "0.0.0.0:8789:8787"
     environment:
       HARRY_SCREENSHOT_MODE: "false"
+      # Optional public-address overrides for a real install:
+      # HARRY_PUBLIC_BASE_URL: "http://<brain-lan-ip>:8789"
+      # HARRY_BRAIN_LAN_IP: "<brain-lan-ip>"
+      # HARRY_PUBLIC_PORT: "8789"

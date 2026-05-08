@@ -57,6 +57,7 @@ After install:
 UI:     http://localhost:8787
 Health: http://localhost:8787/health
 Public agent address example: HARRY_PUBLIC_BASE_URL=http://<brain-ip>:8789
+Public agent LAN override: HARRY_BRAIN_LAN_IP=<brain-ip> HARRY_PUBLIC_PORT=8789
 
 ---
 
@@ -76,9 +77,9 @@ It provides:
 
 ### Linux Agent
 
-export HARRY_BASE_URL="http://<brain-ip>:8789"
+export HARRY_PUBLIC_BASE_URL="http://<brain-ip>:8789"
 
-curl -fsSL "$HARRY_BASE_URL/scripts/install-agent.sh" | sudo -E bash
+curl -fsSL "$HARRY_PUBLIC_BASE_URL/scripts/install-agent.sh" | sudo -E bash
 
 ---
 
@@ -143,6 +144,7 @@ Default Brain listen port:
 
 Example public agent-facing address:
 HARRY_PUBLIC_BASE_URL=http://<brain-ip>:8789
+HARRY_BRAIN_LAN_IP=<brain-ip> HARRY_PUBLIC_PORT=8789
 
 Requirements:
 
