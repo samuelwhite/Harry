@@ -1021,16 +1021,41 @@ table.inv {
 
 .details summary {
   cursor: pointer;
+  position: relative;
   list-style: none;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 12px;
   font-weight: 900;
   color: rgba(255,255,255,0.86);
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid rgba(255,255,255,0.10);
   background: rgba(255,255,255,0.04);
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+}
+
+.details summary::after {
+  content: "⌄";
+  color: rgba(255,255,255,0.62);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform 0.16s ease, color 0.16s ease;
+}
+
+.details[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.details summary:hover {
+  background: rgba(255,255,255,0.07);
+  border-color: rgba(255,255,255,0.16);
+}
+
+.details summary:focus-visible {
+  outline: 2px solid rgba(96,165,250,0.72);
+  outline-offset: 2px;
 }
 
 .details summary::-webkit-details-marker { display:none; }
@@ -1492,7 +1517,20 @@ JS_PULSE = r"""
     });
   }
 
+  function syncDetails() {
+    document.querySelectorAll("details > summary").forEach((summary) => {
+      const details = summary.parentElement;
+      summary.setAttribute("aria-expanded", details && details.open ? "true" : "false");
+      summary.setAttribute("role", "button");
+    });
+  }
+
   initMenu();
+  document.addEventListener("DOMContentLoaded", syncDetails);
+  document.querySelectorAll("details").forEach((details) => {
+    details.addEventListener("toggle", syncDetails);
+  });
+  syncDetails();
   poll();
   setInterval(poll, POLL_MS);
 })();
