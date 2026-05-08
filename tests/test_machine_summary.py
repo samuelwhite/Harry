@@ -42,7 +42,7 @@ def test_machine_summary_returns_cached_summary(monkeypatch, tmp_path):
     cache = {
         "node": "node-1",
         "fingerprint": ms._summary_fingerprint(payload),
-        "generated_at": "2026-05-07T12:00:00Z",
+        "generated_at": ms._iso_now(),
         "source": "cache",
         "summary": "Cached summary.",
     }

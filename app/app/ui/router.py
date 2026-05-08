@@ -588,6 +588,34 @@ def _brain_url_warning(url: str) -> str | None:
     return None
 
 
+def _downloads_fallback_help_html() -> str:
+    return """
+<section class="section" id="downloads-warning">
+  <details class="card" style="padding:18px 20px;">
+    <summary style="cursor:pointer; list-style:none; font-weight:700;">Need help finding the address?</summary>
+    <div class="subtitle" style="margin-top:12px;">Installers will try to discover Harry Brain automatically.</div>
+    <div class="subtitle" style="margin-top:10px;">Windows: run <code>ipconfig</code>.</div>
+    <div class="subtitle" style="margin-top:8px;">Linux/macOS: run <code>hostname -I</code>.</div>
+    <div class="subtitle" style="margin-top:10px;">Use the IPv4 address that other machines on your network can reach.</div>
+    <div class="subtitle" style="margin-top:10px;">Example: <code>http://192.168.1.100:8789</code></div>
+  </details>
+</section>
+"""
+
+
+def _downloads_advanced_help_html() -> str:
+    return """
+<section class="section" id="downloads-advanced">
+  <details class="card" style="padding:18px 20px;">
+    <summary style="cursor:pointer; list-style:none; font-weight:700;">Advanced configuration</summary>
+    <div class="subtitle" style="margin-top:12px;">Use these if discovery does not pick the right address:</div>
+    <div class="subtitle" style="margin-top:10px;"><code>HARRY_PUBLIC_BASE_URL=http://192.168.1.100:8789</code></div>
+    <div class="subtitle" style="margin-top:8px;"><code>HARRY_BRAIN_LAN_IP=192.168.1.100</code> with <code>HARRY_PUBLIC_PORT=8789</code></div>
+  </details>
+</section>
+"""
+
+
 @router.get("/ui/health")
 def ui_health() -> PlainTextResponse:
     return PlainTextResponse("ok\n")
@@ -667,26 +695,8 @@ def downloads_page(request: Request) -> HTMLResponse:
 </div>
 """
 
-    warning_html = ""
-    if needs_guidance:
-        warning_line = ""
-        if warning:
-            warning_line = f"""
-    <div class="v" style="margin-top:8px;">{html.escape(warning)}</div>
-"""
-
-        warning_html = f"""
-<section class="section" id="downloads-warning">
-  <div class="card" style="border:1px solid rgba(245, 158, 11, 0.55);">
-    <div class="k">Need help finding the Brain address?</div>
-    {warning_line}
-    <div class="subtitle" style="margin-top:10px;">Installers will try to discover Harry Brain automatically. If discovery cannot confidently identify a LAN address, the Brain may be behind Docker/container networking, a reverse proxy, multiple interfaces, or missing explicit config.</div>
-    <div class="subtitle" style="margin-top:10px;">Find the Brain machine's LAN IP with <code>hostname -I</code> on Linux/macOS or <code>ipconfig</code> on Windows.</div>
-    <div class="subtitle" style="margin-top:10px;">Use a valid address like <code>http://192.168.1.100:8789</code> or <code>http://nas.local:8789</code>.</div>
-    <div class="subtitle" style="margin-top:10px;">For Docker or reverse-proxy installs, set <code>HARRY_PUBLIC_BASE_URL=http://192.168.1.100:8789</code> or <code>HARRY_BRAIN_LAN_IP=192.168.1.100</code> with <code>HARRY_PUBLIC_PORT=8789</code>.</div>
-  </div>
-</section>
-"""
+    warning_html = _downloads_fallback_help_html() if needs_guidance else ""
+    advanced_html = _downloads_advanced_help_html()
 
     content = f"""
     {warning_html}
@@ -696,12 +706,11 @@ def downloads_page(request: Request) -> HTMLResponse:
     <div class="k">Recommended Brain address</div>
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <div class="v big">
-        <code id="brain-url">{html.escape(brain_url if not needs_guidance else "Not yet determined automatically")}</code>
+        <code id="brain-url">{html.escape(brain_url if not needs_guidance else "Could not determine automatically")}</code>
       </div>
       {"<button class=\"btn\" onclick=\"navigator.clipboard.writeText(document.getElementById('brain-url').innerText)\">Copy</button>" if not needs_guidance else ""}
     </div>
-    <div class="subtitle">The installer will try to find Harry Brain automatically. If it cannot, paste the LAN-reachable address into the installer on another machine on your network.</div>
-    <div class="subtitle" style="margin-top:10px;">If the automatic address is wrong, set <code>HARRY_PUBLIC_BASE_URL=http://192.168.1.100:8789</code> or <code>HARRY_BRAIN_LAN_IP=192.168.1.100</code> with <code>HARRY_PUBLIC_PORT=8789</code>.</div>
+    <div class="subtitle">The installer will try to find Harry Brain automatically. If discovery fails, enter the LAN address of this machine.</div>
   </div>
 </section>
 
@@ -715,102 +724,14 @@ def downloads_page(request: Request) -> HTMLResponse:
   {downloads_html}
 </section>
 
-<section class="section" id="downloads-notes">
-  <div class="sectionhead">
-    <div>
-      <h2 class="h2">Add a Node to Harry</h2>
-      <div class="h2sub">Install Harry Agent on another machine and connect it to this Brain.</div>
-    </div>
-  </div>
+{advanced_html}
 
-  <div class="card">
-    <div class="advrow">
-      <div class="advleft">
-        <div class="advnode">1. Download the installer</div>
-        <div class="advmsg">Choose the installer for the machine you want to add.</div>
-      </div>
-    </div>
-
-    <div class="advrow">
-      <div class="advleft">
-        <div class="advnode">2. Run it on the target machine</div>
-        <div class="advmsg">Start the installer on the machine you want Harry to monitor.</div>
-      </div>
-    </div>
-
-    <div class="advrow">
-      <div class="advleft">
-        <div class="advnode">3. Enter the Brain address</div>
-        <div class="advmsg">When prompted by the installer, use the LAN-reachable Brain address. Do not use <code>localhost</code> unless installing on the Brain machine itself.</div>
-      </div>
-    </div>
-
-    <div class="advrow">
-      <div class="advleft">
-        <div class="advnode">4. Confirm the node in Fleet</div>
-        <div class="advmsg">After installation, return to Fleet and check that the new machine appears.</div>
-      </div>
-    </div>
-
-    <div class="advrow">
-      <div class="advleft">
-        <div class="advnode">5. Brain machine local agent</div>
-        <div class="advmsg">Harry Brain and the local Harry Agent are separate. If this Brain machine does not appear in Overview, install or check the local Harry Agent service.</div>
-      </div>
-    </div>
-  </div>
-
+<section class="section" id="downloads-footer">
   <div class="footerline">
     <strong>Note for Windows users:</strong>
     Windows SmartScreen may show a warning when running the installer.<br>
     This is normal for newly built software that has not yet been digitally signed.<br>
     Choose <code>More info</code> → <code>Run anyway</code> to continue.
-  </div>
-</section>
-
-<section class="section" id="downloads-help">
-  <div class="sectionhead">
-    <div>
-      <h2 class="h2">If the Brain address is wrong</h2>
-      <div class="h2sub">Find the correct LAN IP for this machine.</div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="advrow">
-      <div class="advleft">
-        <div class="advnode">Future automatic discovery</div>
-        <div class="advmsg">TODO: add mDNS / Bonjour discovery, consider a <code>harry.local</code> fallback, and keep manual IP entry available when discovery is unavailable.</div>
-      </div>
-    </div>
-
-    <div class="advrow">
-      <div class="advleft">
-        <div class="advnode">1. Open Command Prompt</div>
-        <div class="advmsg">Press Start, type <code>cmd</code>, and open Command Prompt.</div>
-      </div>
-    </div>
-
-    <div class="advrow">
-      <div class="advleft">
-        <div class="advnode">2. Run ipconfig</div>
-        <div class="advmsg">Type <code>ipconfig</code> and press Enter.</div>
-      </div>
-    </div>
-
-    <div class="advrow">
-      <div class="advleft">
-        <div class="advnode">3. Find your active network adapter</div>
-        <div class="advmsg">Look for the adapter currently connected to your network, such as Ethernet or Wi-Fi.</div>
-      </div>
-    </div>
-
-    <div class="advrow">
-      <div class="advleft">
-        <div class="advnode">4. Find IPv4 Address</div>
-        <div class="advmsg">Use the <code>IPv4 Address</code> value in the installer, in the format <code>http://192.168.1.100:8789</code>. Replace it with the real address your agents can reach.</div>
-      </div>
-    </div>
   </div>
 </section>
 """
@@ -846,8 +767,7 @@ def downloads_page(request: Request) -> HTMLResponse:
             "items": [
                 {"label": "Agent Installers", "href": "/downloads#downloads-overview", "page": "downloads", "sub": True},
                 {"label": "Available Downloads", "href": "/downloads#downloads-files", "sub": True},
-                {"label": "Add a Node", "href": "/downloads#downloads-notes", "sub": True},
-                {"label": "Fix Brain Address", "href": "/downloads#downloads-help", "sub": True},
+                {"label": "Need help finding the address?", "href": "/downloads#downloads-warning", "sub": True},
             ],
         },
     ]

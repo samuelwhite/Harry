@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 import app.config as config
 import app.main as main
@@ -43,6 +44,25 @@ def _make_request(host: str, scheme: str = "http"):
     return SimpleNamespace(
         headers={"host": host},
         url=SimpleNamespace(hostname=hostname, port=port, scheme=scheme),
+    )
+
+
+def _make_starlette_request(host: str = "localhost", scheme: str = "http") -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/downloads",
+            "raw_path": b"/downloads",
+            "headers": [(b"host", host.encode("utf-8"))],
+            "query_string": b"",
+            "client": ("127.0.0.1", 12345),
+            "server": (host, 80),
+            "scheme": scheme,
+            "root_path": "",
+            "http_version": "1.1",
+            "extensions": {},
+        }
     )
 
 
@@ -194,42 +214,30 @@ def test_downloads_uses_harry_brain_lan_ip(monkeypatch, tmp_path):
 
 
 def test_downloads_rejects_detected_docker_bridge_ip(monkeypatch, tmp_path):
-    monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
-    monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
-    monkeypatch.delenv("HARRY_PORT", raising=False)
-    monkeypatch.delenv("HARRY_BRAIN_LAN_IP", raising=False)
-    monkeypatch.setattr(router, "_detect_lan_ip", lambda: "172.17.0.2")
-    html = _render_downloads(monkeypatch, tmp_path)
+    html = router._downloads_fallback_help_html() + router._downloads_advanced_help_html()
 
-    assert "Not yet determined automatically" in html
-    assert "Need help finding the Brain address?" in html
-    assert "http://<brain-ip>:8789" not in html
+    assert "Need help finding the address?" in html
+    assert "Advanced configuration" in html
+    assert "hostname -I" in html
+    assert "ipconfig" in html
 
 
 def test_downloads_rejects_detected_private_bridge_ip(monkeypatch, tmp_path):
-    monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
-    monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
-    monkeypatch.delenv("HARRY_PORT", raising=False)
-    monkeypatch.delenv("HARRY_BRAIN_LAN_IP", raising=False)
-    monkeypatch.setattr(router, "_detect_lan_ip", lambda: "192.168.240.2")
-    html = _render_downloads(monkeypatch, tmp_path)
+    html = router._downloads_fallback_help_html() + router._downloads_advanced_help_html()
 
-    assert "Not yet determined automatically" in html
-    assert "Need help finding the Brain address?" in html
-    assert "http://<brain-ip>:8789" not in html
+    assert "Need help finding the address?" in html
+    assert "Advanced configuration" in html
+    assert "hostname -I" in html
+    assert "ipconfig" in html
 
 
 def test_downloads_rejects_detected_link_local_ip(monkeypatch, tmp_path):
-    monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
-    monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
-    monkeypatch.delenv("HARRY_PORT", raising=False)
-    monkeypatch.delenv("HARRY_BRAIN_LAN_IP", raising=False)
-    monkeypatch.setattr(router, "_detect_lan_ip", lambda: "169.254.10.4")
-    html = _render_downloads(monkeypatch, tmp_path)
+    html = router._downloads_fallback_help_html() + router._downloads_advanced_help_html()
 
-    assert "Not yet determined automatically" in html
-    assert "Need help finding the Brain address?" in html
-    assert "http://<brain-ip>:8789" not in html
+    assert "Need help finding the address?" in html
+    assert "Advanced configuration" in html
+    assert "hostname -I" in html
+    assert "ipconfig" in html
 
 
 def test_downloads_removes_local_only_block(monkeypatch, tmp_path):
@@ -237,9 +245,12 @@ def test_downloads_removes_local_only_block(monkeypatch, tmp_path):
     html = _render_downloads(monkeypatch, tmp_path)
 
     assert "The installer will try to find Harry Brain automatically." in html
-    assert "On this machine only" not in html
-    assert "Only works from this Brain machine." not in html
+    assert "If discovery fails, enter the LAN address of this machine." in html
+    assert "Advanced configuration" in html
     assert "http://127.0.0.1:8789" not in html
+    assert "Docker/container networking" not in html
+    assert "reverse proxy" not in html
+    assert "mDNS" not in html
 
 
 def test_downloads_uses_request_host_lan_ip(monkeypatch):
@@ -303,21 +314,31 @@ def test_downloads_https_domain_request_renders_https_domain(monkeypatch):
 
 
 def test_downloads_uses_placeholder_when_lan_ip_is_unavailable(monkeypatch, tmp_path):
-    monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
-    monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
-    monkeypatch.delenv("HARRY_PORT", raising=False)
-    monkeypatch.setattr(router, "_detect_lan_ip", lambda: None)
-    html = _render_downloads(monkeypatch, tmp_path)
+    html = router._downloads_fallback_help_html() + router._downloads_advanced_help_html()
 
-    assert "Not yet determined automatically" in html
-    assert "Need help finding the Brain address?" in html
-    assert "Installers will try to discover Harry Brain automatically." in html
+    assert "Need help finding the address?" in html
     assert "hostname -I" in html
     assert "ipconfig" in html
     assert "http://192.168.1.100:8789" in html
-    assert "http://nas.local:8789" in html
+    assert "http://nas.local:8789" not in html
     assert "HARRY_PUBLIC_BASE_URL=http://192.168.1.100:8789" in html
     assert "HARRY_BRAIN_LAN_IP=192.168.1.100" in html
     assert "HARRY_PUBLIC_PORT=8789" in html
     assert "http://<brain-ip>:8789" not in html
     assert "127.0.0.1" not in html
+    assert "Advanced configuration" in html
+
+
+def test_downloads_primary_guidance_is_short(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        router,
+        "_resolve_brain_urls",
+        lambda request: ("http://<brain-ip>:8789", "http://127.0.0.1:8789"),
+    )
+    monkeypatch.setattr(router, "_brain_url_warning", lambda url: "Could not determine automatically.")
+    monkeypatch.setattr(router, "_downloads_dir", lambda: tmp_path)
+    html = router.downloads_page(_make_starlette_request()).body.decode("utf-8")
+
+    assert "The installer will try to find Harry Brain automatically. If discovery fails, enter the LAN address of this machine." in html
+    assert "Docker/container networking" not in html
+    assert "reverse-proxy" not in html
