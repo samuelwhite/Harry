@@ -331,6 +331,20 @@ with open(p, "r", encoding="utf-8") as fh:
 PY
 }
 
+version_is_newer() {
+  local candidate="${1:-}"
+  local current="${2:-}"
+
+  [ -n "$candidate" ] || return 1
+  [ -n "$current" ] || return 1
+
+  [ "$candidate" = "$current" ] && return 1
+
+  local newest
+  newest="$(printf '%s\n%s\n' "$candidate" "$current" | sort -V | tail -n1)"
+  [ "$newest" = "$candidate" ]
+}
+
 # -----------------------------------------------------------------------------
 # Self-update
 # -----------------------------------------------------------------------------
@@ -345,8 +359,11 @@ self_update() {
     return 0
   fi
 
+  local me_dir
+  me_dir="$(dirname "$me")"
+
   local tmp
-  tmp="$(mktemp /tmp/harry_agent.XXXXXX.sh)"
+  tmp="$(mktemp "${me_dir%/}/.harry_agent.XXXXXX.sh" 2>/dev/null || mktemp /tmp/harry_agent.XXXXXX.sh)"
 
   if ! "$CURL" -fsSL "$DIST_URL" -o "$tmp" >/dev/null 2>&1; then
     rm -f "$tmp" >/dev/null 2>&1 || true
@@ -381,6 +398,22 @@ self_update() {
     log_fail "self_update_failed node=${HARRY_NODE} reason=candidate_invalid_json dist_url=${DIST_URL}"
     return 0
   fi
+
+  local candidate_version
+  candidate_version="$("$PYTHON" - "$tmp_payload" <<'PY'
+import json, sys
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+print((data.get("agent_version") or "").strip())
+PY
+)"
+
+  if [ -n "$candidate_version" ] && ! version_is_newer "$candidate_version" "$AGENT_VERSION"; then
+    rm -f "$tmp" "$tmp_payload" >/dev/null 2>&1 || true
+    log_fail "self_update_skipped node=${HARRY_NODE} reason=candidate_not_newer current=${AGENT_VERSION} candidate=${candidate_version} dist_url=${DIST_URL}"
+    return 0
+  fi
+
   rm -f "$tmp_payload" >/dev/null 2>&1 || true
 
   if cmp -s "$tmp" "$me" >/dev/null 2>&1; then
