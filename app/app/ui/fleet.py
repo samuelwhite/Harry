@@ -29,6 +29,7 @@ from app.ui.db import (
     _safe_str,
     _utcnow,
     _clamp,
+    get_latest_node_records,
     get_recent_events,
 )
 from app.ui.templates import (
@@ -181,21 +182,23 @@ def _render_activity_body(
         node_label = _html_escape(_safe_str(item.get("node_label") or ""))
         relative_time = _html_escape(_safe_str(item.get("relative_time") or "unknown"))
         badge = _html_escape(_safe_str(item.get("badge") or tone.upper()))
-        meta_bits = [bit for bit in (detail, relative_time, node_label) if bit]
+        meta_bits = [bit for bit in (detail, node_label) if bit]
         meta = " · ".join(meta_bits)
 
         rows.append(
             f"""
 <div class="timelineitem">
-  <div class="timelinelead">
+  <div class="timelineage">{relative_time}</div>
+  <div class="timelinedotwrap">
     <span class="timelinedot {tone}"></span>
-    <span class="timelineage">{relative_time}</span>
   </div>
   <div class="timelinebody">
     <div class="timelineheadline">{title}</div>
     <div class="timelinemeta">{meta if meta else ''}</div>
   </div>
-  <span class="badgetxt {tone} timelinebadge">{badge}</span>
+  <div class="timelinebadgewrap">
+    <span class="badgetxt {tone} timelinebadge">{badge}</span>
+  </div>
 </div>
 """
         )
@@ -203,8 +206,14 @@ def _render_activity_body(
     return "".join(rows)
 
 
-def _render_activity_section(events: List[Dict[str, Any]], loading: bool = False, error: Optional[str] = None) -> str:
-    items = prepare_activity_items(events)
+def _render_activity_section(
+    events: List[Dict[str, Any]],
+    *,
+    current_nodes: Optional[Dict[str, Dict[str, Any]]] = None,
+    loading: bool = False,
+    error: Optional[str] = None,
+) -> str:
+    items = prepare_activity_items(events, current_nodes=current_nodes)
     body = _render_activity_body(events, loading=loading, error=error, items=items)
     count_txt = "Loading…" if loading else ("Unavailable" if error else f"{len(items)} events")
     latest_txt = "Last updated just now" if not error else "Last updated unavailable"
@@ -232,22 +241,22 @@ def _render_activity_section(events: List[Dict[str, Any]], loading: bool = False
 
 def _service_status_class(status: str) -> str:
     sev = (status or "unknown").strip().lower()
-    if sev == "online":
+    if sev in ("online", "healthy"):
         return "ok"
-    if sev == "degraded":
+    if sev in ("degraded", "warning"):
         return "warn"
-    if sev == "offline":
+    if sev in ("offline", "critical"):
         return "bad"
     return "info"
 
 
 def _service_status_label(status: str) -> str:
     sev = (status or "unknown").strip().lower()
-    if sev == "online":
+    if sev in ("online", "healthy"):
         return "Online"
-    if sev == "degraded":
+    if sev in ("degraded", "warning"):
         return "Degraded"
-    if sev == "offline":
+    if sev in ("offline", "critical"):
         return "Offline"
     return "Unknown"
 
@@ -255,16 +264,22 @@ def _service_status_label(status: str) -> str:
 def _render_services_section(primary: Optional[NodeView] = None) -> str:
     if not has_explicit_service_configuration():
         display_name = _display_node_name(primary.node) if primary else "Harry Brain"
-        headline = _html_escape(primary.headline if primary else "Everything looks calm.")
+        headline = _html_escape(primary.headline if primary else "No machine telemetry has checked in yet.")
         status = _service_status_label((primary.health_state if primary else "healthy") or "healthy")
         status_class = _service_status_class((primary.health_state if primary else "healthy") or "healthy")
         last_seen = _html_escape(_ago(primary.ts) if primary else "just now")
+        if primary and primary.stale:
+            summary = "Brain service online; this machine telemetry agent is not reporting right now."
+        elif primary:
+            summary = "Brain service online; machine telemetry is reporting separately through Harry Agent."
+        else:
+            summary = "Brain service online; machine telemetry agent not installed or not reporting yet."
         return f"""
 <div class="section" id="system-status">
   <div class="sectionhead">
     <div>
       <div class="h2">System status</div>
-      <div class="h2sub">Harry Brain is online. Add configured services to let Harry watch Jellyfin, Home Assistant, Ollama, The Librarian, and other household apps.</div>
+      <div class="h2sub">Brain service health is shown separately from machine telemetry.</div>
     </div>
     <span class="badgetxt {status_class}">{_html_escape(status)}</span>
   </div>
@@ -273,8 +288,14 @@ def _render_services_section(primary: Optional[NodeView] = None) -> str:
     <div class="advwrap">
       <div class="advrow">
         <div class="advleft">
+          <div class="advnode">Harry Brain is online</div>
+          <div class="advmsg">{_html_escape(summary)}</div>
+        </div>
+      </div>
+      <div class="advrow">
+        <div class="advleft">
           <div class="advnode">{_html_escape(display_name)}</div>
-          <div class="advmsg">Last heartbeat {last_seen} · {headline}</div>
+          <div class="advmsg">Machine telemetry: {headline} · Last heartbeat {last_seen}</div>
         </div>
       </div>
     </div>
@@ -1873,6 +1894,11 @@ def _render_single_node_overview(nv: NodeView, hours: int) -> str:
     setup_href = f"/downloads#downloads-instructions"
     meta = node_meta_summary(nv.node)
     meta_line = f" · {meta}" if meta else ""
+    brain_detail = (
+        "Brain service is healthy, but the local telemetry agent has stopped reporting."
+        if nv.stale
+        else "Brain service is healthy. Machine telemetry arrives separately from Harry Agent."
+    )
     return f"""
 <div class="section" id="single-node-overview">
   <div class="sectionhead">
@@ -1889,6 +1915,12 @@ def _render_single_node_overview(nv: NodeView, hours: int) -> str:
         <div class="advleft">
           <div class="advnode">{_html_escape(_display_node_name(nv.node))}</div>
           <div class="advmsg">Machine identity: {_html_escape(nv.model or nv.cpu or 'unknown hardware')}{_html_escape(meta_line)}</div>
+        </div>
+      </div>
+      <div class="advrow">
+        <div class="advleft">
+          <div class="advnode">Brain service</div>
+          <div class="advmsg">{_html_escape(brain_detail)}</div>
         </div>
       </div>
       <div class="advrow">
@@ -2113,6 +2145,7 @@ def render_fleet_live(hours: int, debug: bool) -> str:
     nodeviews = build_nodeviews(hours=hours)
     hidden_nodeviews = build_hidden_nodeviews(hours=hours)
     brain_name = (os.environ.get("HARRY_BRAIN_NODE") or "brain").strip()
+    current_nodes = get_latest_node_records()
     try:
         activity_events = get_recent_events(limit=8, sync_stale=False)
     except Exception:
@@ -2121,7 +2154,7 @@ def render_fleet_live(hours: int, debug: bool) -> str:
     fleet_stats_html = _render_fleet_stats(nodeviews)
     trends_html = _render_fleet_trends(nodeviews, hours=hours)
     hidden_html = _render_hidden_nodes(hidden_nodeviews, hours=hours)
-    activity_html = _render_activity_section(activity_events)
+    activity_html = _render_activity_section(activity_events, current_nodes=current_nodes)
 
     if len(nodeviews) == 1:
         primary = nodeviews[0]
@@ -2194,11 +2227,11 @@ def render_fleet_live(hours: int, debug: bool) -> str:
   {_fleet_outlier_pills(nodeviews)}
   {fleet_stats_html}
   <div class="divider"></div>
+  {fleet_map_html}
+  <div class="divider"></div>
   {activity_html}
   <div class="divider"></div>
   {_render_services_section(primary=nodeviews[0] if nodeviews else None)}
-  <div class="divider"></div>
-  {fleet_map_html}
   <div class="divider"></div>
   {table_html}
   <div class="divider"></div>
@@ -2286,19 +2319,21 @@ def _activity_polling_script() -> str:
     const node = escapeHtml((item && item.node_label) || "");
     const time = escapeHtml((item && item.relative_time) || "unknown");
     const badge = escapeHtml((item && item.badge) || tone.toUpperCase());
-    const meta = [detail, time, node].filter(Boolean).join(" · ");
+    const meta = [detail, node].filter(Boolean).join(" · ");
 
     return `
 <div class="timelineitem">
-  <div class="timelinelead">
+  <div class="timelineage">${time}</div>
+  <div class="timelinedotwrap">
     <span class="timelinedot ${tone}"></span>
-    <span class="timelineage">${time}</span>
   </div>
   <div class="timelinebody">
     <div class="timelineheadline">${title}</div>
     <div class="timelinemeta">${meta}</div>
   </div>
-  <span class="badgetxt ${tone} timelinebadge">${badge}</span>
+  <div class="timelinebadgewrap">
+    <span class="badgetxt ${tone} timelinebadge">${badge}</span>
+  </div>
 </div>`;
   }
 
@@ -2386,7 +2421,7 @@ def render_fleet_page(hours: int, debug: bool) -> str:
     return render_shell(
         title="HARRY — Fleet",
         active_page="fleet",
-        page_title="Fleet",
+        page_title="Overview",
         page_subtitle=page_subtitle,
         sidebar_sections=_fleet_sidebar(hours=hours, debug=debug),
         actions=_global_actions(hours=hours, debug=debug),

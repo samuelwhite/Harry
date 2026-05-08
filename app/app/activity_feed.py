@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from app.db_helpers import _parse_ts, _safe_str
+from app.db_helpers import STALE_SECONDS, _parse_ts, _safe_str
 from app.node_metadata import node_display_name
 
 
@@ -87,9 +87,70 @@ def _event_sort_key(event: Dict[str, Any]) -> Tuple[datetime, int]:
     return (ts, event_id)
 
 
-def _format_event_title(event: Dict[str, Any]) -> Tuple[str, str]:
+def _current_node_record(
+    current_nodes: Optional[Dict[str, Dict[str, Any]]],
+    node_id: str,
+) -> Optional[Dict[str, Any]]:
+    if not current_nodes or not node_id:
+        return None
+    record = current_nodes.get(node_id)
+    return record if isinstance(record, dict) else None
+
+
+def _node_is_currently_stale(
+    node_id: str,
+    current_nodes: Optional[Dict[str, Dict[str, Any]]],
+    *,
+    now: datetime,
+) -> bool:
+    record = _current_node_record(current_nodes, node_id)
+    if not record:
+        return False
+
+    if record.get("stale") is True:
+        return True
+
+    ts = _parse_ts(_safe_str(record.get("ts") or ""))
+    if not ts:
+        return False
+    return (now - ts).total_seconds() >= STALE_SECONDS
+
+
+def _node_is_currently_degraded(
+    node_id: str,
+    current_nodes: Optional[Dict[str, Dict[str, Any]]],
+) -> bool:
+    record = _current_node_record(current_nodes, node_id)
+    if not record:
+        return False
+
+    payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+    agent_status = payload.get("agent_status") if isinstance(payload.get("agent_status"), dict) else {}
+    state = _safe_str(agent_status.get("state") or "").strip().lower()
+    if state in {"bootstrapping", "degraded", "error"}:
+        return True
+    return agent_status.get("ok") is False
+
+
+def _recovery_detail(minutes: float | int | None, *, known: bool = True) -> str:
+    if not known or minutes is None:
+        return "Recovered; duration unknown."
+
+    mins = max(0.0, float(minutes))
+    if mins < 1:
+        return "Recovered after a short gap"
+    return f"Recovered after {format_duration(mins)}"
+
+
+def _format_event_title(
+    event: Dict[str, Any],
+    *,
+    now: datetime,
+    current_nodes: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Tuple[str, str]:
     typ = _safe_str(event.get("type") or "").strip()
     node = _node_label(event) or "this node"
+    node_id = _safe_str(event.get("node_id") or event.get("machine_id") or "").strip()
     message = _safe_str(event.get("message") or "").strip()
     metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
 
@@ -98,17 +159,22 @@ def _format_event_title(event: Dict[str, Any]) -> Tuple[str, str]:
     if typ == "agent.heartbeat_missed":
         gap_seconds = metadata.get("age_seconds") or metadata.get("gap_seconds")
         gap_mins = float(gap_seconds or 0) / 60.0 if gap_seconds is not None else None
-        detail = f"No response for {format_duration(gap_mins)}"
-        return (f"Harry briefly lost contact with {node}", detail)
+        if _node_is_currently_stale(node_id, current_nodes, now=now):
+            detail = f"No response for {format_duration(gap_mins)}" if gap_mins is not None else "Waiting for a fresh heartbeat."
+            return (f"{node} is not checking in right now", detail)
+        detail = f"Missed a heartbeat for {format_duration(gap_mins)}" if gap_mins is not None else "Missed a heartbeat earlier."
+        return (f"Harry missed a heartbeat from {node}", detail)
     if typ == "agent.heartbeat_restored":
         gap_seconds = metadata.get("gap_seconds")
         gap_mins = float(gap_seconds or 0) / 60.0 if gap_seconds is not None else None
-        detail = f"Recovered after {format_duration(gap_mins)}"
+        detail = _recovery_detail(gap_mins, known=gap_seconds is not None)
         return (f"{node} recovered", detail)
     if typ == "agent.offline":
         state = _safe_str(metadata.get("state") or "").strip()
         detail = message or (f"Last known state: {state}" if state else "Last known state unavailable")
-        return (f"{node} is not checking in right now", detail)
+        if _node_is_currently_stale(node_id, current_nodes, now=now) or _node_is_currently_degraded(node_id, current_nodes):
+            return (f"{node} is not checking in right now", detail)
+        return (f"{node} reported trouble earlier", detail)
     if typ == "hardware.gpu_detected":
         count = metadata.get("gpu_count")
         detail = f"Reported {count} GPU" + ("s" if count and int(count) != 1 else "") if count else "GPU hardware detected"
@@ -125,12 +191,25 @@ def _format_event_title(event: Dict[str, Any]) -> Tuple[str, str]:
     return (title, detail)
 
 
-def prepare_activity_items(events: Iterable[Dict[str, Any]], *, now: Optional[datetime] = None) -> List[Dict[str, Any]]:
+def prepare_activity_items(
+    events: Iterable[Dict[str, Any]],
+    *,
+    now: Optional[datetime] = None,
+    current_nodes: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     now = now or _now_utc()
     ordered = sorted([e for e in events if isinstance(e, dict)], key=_event_sort_key, reverse=True)
     items: List[Dict[str, Any]] = []
     used: set[int] = set()
     pair_window = timedelta(minutes=45)
+    latest_restored: Dict[str, datetime] = {}
+
+    for event in ordered:
+        typ = _safe_str(event.get("type") or "").strip()
+        node_id = _safe_str(event.get("node_id") or event.get("machine_id") or "").strip()
+        created_at = _event_time(event)
+        if typ == "agent.heartbeat_restored" and node_id and created_at and node_id not in latest_restored:
+            latest_restored[node_id] = created_at
 
     for idx, event in enumerate(ordered):
         if idx in used:
@@ -174,7 +253,7 @@ def prepare_activity_items(events: Iterable[Dict[str, Any]], *, now: Optional[da
                         "created_at": _safe_str(event.get("created_at") or ""),
                         "relative_time": format_relative_ago(created_at, now=now),
                         "title": f"{node_label or node_id} briefly dropped offline, then recovered",
-                        "detail": f"Recovered after {format_duration(gap_minutes)}",
+                        "detail": _recovery_detail(gap_minutes),
                         "node_id": node_id,
                         "node_label": node_label,
                         "badge": "SUCCESS",
@@ -183,7 +262,12 @@ def prepare_activity_items(events: Iterable[Dict[str, Any]], *, now: Optional[da
                 )
                 continue
 
-        title, detail = _format_event_title(event)
+        if typ == "agent.heartbeat_missed" and node_id:
+            restored_at = latest_restored.get(node_id)
+            if restored_at and created_at and restored_at > created_at and not _node_is_currently_stale(node_id, current_nodes, now=now):
+                continue
+
+        title, detail = _format_event_title(event, now=now, current_nodes=current_nodes)
         badge = level.upper()
         tone = "info"
         if level in ("error", "danger", "critical"):

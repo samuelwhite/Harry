@@ -55,6 +55,7 @@ def test_render_fleet_live_uses_single_node_mode(monkeypatch):
 
     assert "Harry is watching this machine." in html
     assert "This is the Brain node." in html
+    assert "Brain service is healthy." in html
     assert "Why Harry says this" in html
     assert "CPU" in html
     assert "Memory" in html

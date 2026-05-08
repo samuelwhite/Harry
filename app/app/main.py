@@ -22,6 +22,7 @@ from app.service_awareness import build_service_rows
 from app.ui.db import (
     STALE_SECONDS,
     get_latest_node_record,
+    get_latest_node_records,
     get_recent_events,
     record_event,
 )
@@ -390,6 +391,10 @@ def _emit_ingest_events(previous: Dict[str, Any], current: Dict[str, Any]) -> No
     previous_ts = str(previous.get("ts") or "")
     current_dt = _parse_ts_utc(current_ts)
     previous_dt = _parse_ts_utc(previous_ts)
+    current_status = _agent_status_view(current)
+    previous_status = _agent_status_view(previous) if previous else {}
+    current_state = str(current_status.get("state") or "").lower()
+    previous_state = str(previous_status.get("state") or "").lower()
 
     if not previous:
         _record_event(
@@ -431,10 +436,6 @@ def _emit_ingest_events(previous: Dict[str, Any], current: Dict[str, Any]) -> No
                 },
             )
 
-    current_status = _agent_status_view(current)
-    previous_status = _agent_status_view(previous) if previous else {}
-    current_state = str(current_status.get("state") or "").lower()
-    previous_state = str(previous_status.get("state") or "").lower()
     bad_states = {"bootstrapping", "degraded", "error"}
 
     if current_state in bad_states or current_status.get("ok") is False:
@@ -938,5 +939,5 @@ def api_events(limit: int = 50):
         "ok": True,
         "count": len(events),
         "events": events,
-        "items": prepare_activity_items(events),
+        "items": prepare_activity_items(events, current_nodes=get_latest_node_records()),
     }

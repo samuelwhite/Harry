@@ -115,6 +115,20 @@ def test_fleet_view_includes_recent_activity(monkeypatch, tmp_path):
     assert "Harry noticed something worth mentioning." in html
 
 
+def test_fleet_view_places_overview_before_recent_activity(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+
+    first = datetime.now(timezone.utc).replace(microsecond=0)
+    second = first + timedelta(minutes=1)
+    with TestClient(main.app) as client:
+        assert client.post("/ingest", json=_snapshot(first, node="node-1")).status_code == 200
+        assert client.post("/ingest", json=_snapshot(second, node="node-2", gpu=False, disk_used=40.0)).status_code == 200
+
+    html = fleet_ui.render_fleet_live(hours=72, debug=False)
+
+    assert html.index('id="fleet-overview"') < html.index('id="activity-feed"')
+
+
 def test_fleet_view_shows_empty_activity_state(monkeypatch, tmp_path):
     _setup_temp_db(monkeypatch, tmp_path)
 

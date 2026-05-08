@@ -48,3 +48,118 @@ def test_activity_feed_groups_heartbeat_recovery_pairs():
     assert items[0]["type"] == "agent.heartbeat_pair"
     assert "briefly dropped offline, then recovered" in items[0]["title"]
     assert items[0]["detail"] == "Recovered after about 9 minutes"
+
+
+def test_activity_feed_uses_present_tense_only_while_node_is_stale():
+    now = datetime(2026, 5, 7, 12, 0, tzinfo=timezone.utc)
+    events = [
+        {
+            "id": 1,
+            "type": "agent.heartbeat_missed",
+            "created_at": "2026-05-07T11:30:00Z",
+            "node_id": "cortex",
+            "metadata": {"age_seconds": 3600},
+        }
+    ]
+    current_nodes = {
+        "cortex": {
+            "ts": "2026-05-07T10:45:00Z",
+            "payload": {"agent_status": {"state": "healthy", "ok": True}},
+        }
+    }
+
+    items = prepare_activity_items(events, now=now, current_nodes=current_nodes)
+
+    assert items[0]["title"] == "cortex is not checking in right now"
+    assert items[0]["detail"] == "No response for about 1 hour"
+
+
+def test_activity_feed_rewrites_recovered_offline_copy_as_historical():
+    now = datetime(2026, 5, 7, 12, 0, tzinfo=timezone.utc)
+    events = [
+        {
+            "id": 1,
+            "type": "agent.offline",
+            "created_at": "2026-05-07T11:40:00Z",
+            "node_id": "jarvis",
+            "message": "jarvis reported state error.",
+            "metadata": {"state": "error"},
+        }
+    ]
+    current_nodes = {
+        "jarvis": {
+            "ts": "2026-05-07T11:59:00Z",
+            "payload": {"agent_status": {"state": "healthy", "ok": True}},
+        }
+    }
+
+    items = prepare_activity_items(events, now=now, current_nodes=current_nodes)
+
+    assert items[0]["title"] == "jarvis reported trouble earlier"
+    assert items[0]["detail"] == "jarvis reported state error."
+
+
+def test_activity_feed_suppresses_old_missed_event_after_recovery():
+    now = datetime(2026, 5, 7, 12, 0, tzinfo=timezone.utc)
+    events = [
+        {
+            "id": 1,
+            "type": "agent.heartbeat_restored",
+            "created_at": "2026-05-07T11:55:00Z",
+            "node_id": "cortex",
+            "metadata": {"gap_seconds": 900},
+        },
+        {
+            "id": 2,
+            "type": "agent.heartbeat_missed",
+            "created_at": "2026-05-07T10:30:00Z",
+            "node_id": "cortex",
+            "metadata": {"age_seconds": 900},
+        },
+    ]
+    current_nodes = {
+        "cortex": {
+            "ts": "2026-05-07T11:59:00Z",
+            "payload": {"agent_status": {"state": "healthy", "ok": True}},
+        }
+    }
+
+    items = prepare_activity_items(events, now=now, current_nodes=current_nodes)
+
+    assert len(items) == 1
+    assert items[0]["type"] == "agent.heartbeat_restored"
+
+
+def test_activity_feed_uses_unknown_recovery_copy_when_duration_missing():
+    now = datetime(2026, 5, 7, 12, 0, tzinfo=timezone.utc)
+    events = [
+        {
+            "id": 1,
+            "type": "agent.heartbeat_restored",
+            "created_at": "2026-05-07T11:59:00Z",
+            "node_id": "cortex",
+            "metadata": {},
+        }
+    ]
+
+    items = prepare_activity_items(events, now=now)
+
+    assert items[0]["detail"] == "Recovered; duration unknown."
+
+
+def test_activity_feed_never_says_recovered_after_just_now():
+    now = datetime(2026, 5, 7, 12, 0, tzinfo=timezone.utc)
+    events = [
+        {
+            "id": 1,
+            "type": "agent.heartbeat_restored",
+            "created_at": "2026-05-07T12:00:00Z",
+            "node_id": "cortex",
+            "metadata": {"gap_seconds": 10},
+        }
+    ]
+
+    items = prepare_activity_items(events, now=now)
+
+    assert items[0]["detail"] == "Recovered after a short gap"
+    assert "just now" not in items[0]["detail"]
