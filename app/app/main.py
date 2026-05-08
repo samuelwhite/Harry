@@ -17,6 +17,7 @@ from app.config import DATA_DIR, DB_PATH
 from app.harry_normalise import normalise_for_schema
 from app.harry_schema import validate_harry_snapshot
 from app.health import compute_health
+from app.activity_feed import prepare_activity_items
 from app.service_awareness import build_service_rows
 from app.ui.db import (
     STALE_SECONDS,
@@ -409,7 +410,12 @@ def _emit_ingest_events(previous: Dict[str, Any], current: Dict[str, Any]) -> No
                 title="Agent missed heartbeat",
                 message=f"Missed heartbeat for about {gap_minutes}m before this report.",
                 node_id=node,
-                metadata={"gap_seconds": int(gap_seconds), "previous_report_at": previous_ts, "reported_at": current_ts},
+                metadata={
+                    "gap_seconds": int(gap_seconds),
+                    "previous_report_at": previous_ts,
+                    "reported_at": current_ts,
+                    "previous_state": previous_state or None,
+                },
             )
             _record_event(
                 level="success",
@@ -417,7 +423,12 @@ def _emit_ingest_events(previous: Dict[str, Any], current: Dict[str, Any]) -> No
                 title="Heartbeat restored",
                 message=f"Heartbeat restored after about {gap_minutes}m.",
                 node_id=node,
-                metadata={"gap_seconds": int(gap_seconds), "previous_report_at": previous_ts, "reported_at": current_ts},
+                metadata={
+                    "gap_seconds": int(gap_seconds),
+                    "previous_report_at": previous_ts,
+                    "reported_at": current_ts,
+                    "previous_state": previous_state or None,
+                },
             )
 
     current_status = _agent_status_view(current)
@@ -922,9 +933,10 @@ def api_events(limit: int = 50):
         limit = 50
     limit = max(1, min(limit, 500))
 
-    events = get_recent_events(limit=limit, sync_stale=True)
+    events = get_recent_events(limit=limit, sync_stale=False)
     return {
         "ok": True,
         "count": len(events),
         "events": events,
+        "items": prepare_activity_items(events),
     }

@@ -84,3 +84,12 @@ def test_render_shell_includes_page_eyebrow():
 
     assert "Fleet overview" in html
     assert '<div class="eyebrow">Fleet overview</div>' in html
+
+
+def test_fleet_page_does_not_inject_full_page_refresh_script(monkeypatch):
+    fleet = importlib.import_module("app.ui.fleet")
+    monkeypatch.setattr(fleet, "render_fleet_live", lambda hours, debug: "<div id='fleet-live'></div>")
+    fleet_html = fleet.render_fleet_page(hours=72, debug=False)
+
+    assert "/fleet/partial" not in fleet_html
+    assert "refreshFleet" not in fleet_html

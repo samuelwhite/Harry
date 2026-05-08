@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
+from app.activity_feed import format_relative_ago
+
 CSS = """
 :root {
   --bgA: #08101d;
@@ -860,44 +862,86 @@ table.inv {
   flex-direction: column;
 }
 
-.activityrow {
+.activityheadmeta {
   display: flex;
-  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.activityfoot {
+  margin-top: 6px;
+  color: rgba(255,255,255,0.54);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.timelineitem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
-  padding: 12px 0;
+  align-items: flex-start;
+  padding: 14px 0;
   border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
-.activityrow:last-child { border-bottom: none; }
+.timelineitem:last-child { border-bottom: none; }
 
-.activityleft {
-  min-width: 0;
-}
-
-.activitytitle {
-  font-weight: 950;
-  letter-spacing: 0.2px;
-}
-
-.activitymsg {
-  margin-top: 4px;
-  color: rgba(255,255,255,0.82);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.activitymeta {
+.timelinelead {
   display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: center;
   gap: 8px;
-  text-align: right;
+  min-width: 72px;
+  padding-top: 2px;
 }
 
-.activitynode {
+.timelinedot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.40);
+  box-shadow: 0 0 0 4px rgba(255,255,255,0.05);
+  display: inline-block;
+}
+
+.timelinedot.ok { background: var(--ok); box-shadow: 0 0 0 4px rgba(52,211,153,0.16); }
+.timelinedot.info { background: var(--info); box-shadow: 0 0 0 4px rgba(96,165,250,0.16); }
+.timelinedot.warn { background: var(--warn); box-shadow: 0 0 0 4px rgba(251,191,36,0.16); }
+.timelinedot.bad { background: var(--bad); box-shadow: 0 0 0 4px rgba(251,113,133,0.16); }
+
+.timelineage {
+  color: rgba(255,255,255,0.52);
   font-size: 12px;
-  color: rgba(255,255,255,0.68);
+  font-weight: 700;
+  text-align: center;
+}
+
+.timelinebody {
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.timelineheadline {
+  font-weight: 950;
+  letter-spacing: 0.12px;
+  line-height: 1.35;
+}
+
+.timelinemeta {
+  margin-top: 4px;
+  color: rgba(255,255,255,0.72);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.timelinebadge {
+  margin: 0;
+  align-self: center;
+  font-size: 10.5px;
+  padding: 4px 8px;
+  letter-spacing: 0.25px;
+  opacity: 0.82;
 }
 
 .activitystate {
@@ -919,6 +963,11 @@ table.inv {
   border-color: rgba(251,113,133,0.35);
   background: rgba(251,113,133,0.08);
   color: rgba(255,255,255,0.90);
+}
+
+.compactcard {
+  padding: 0;
+  border-radius: 18px;
 }
 
 .advrow {
@@ -1435,22 +1484,7 @@ def _fmt_dt(dt: Optional[datetime]) -> str:
     return dt.astimezone(timezone.utc).strftime("%a %d %b %Y %H:%M")
 
 def _ago(dt: Optional[datetime]) -> str:
-    if not dt:
-        return "unknown"
-    now = _utcnow()
-    delta = now - dt
-    if delta.total_seconds() < -60:
-        return "in the future (clock?)"
-    if delta.total_seconds() < 60:
-        return "just now"
-    mins = int(delta.total_seconds() // 60)
-    if mins < 60:
-        return f"{mins}m ago"
-    hrs = mins // 60
-    if hrs < 24:
-        return f"{hrs}h ago"
-    days = hrs // 24
-    return f"{days}d ago"
+    return format_relative_ago(dt, now=_utcnow())
 
 def _sev_dot(sev: str) -> str:
     sev = (sev or "ok").lower()

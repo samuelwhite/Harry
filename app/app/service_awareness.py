@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.config import DATA_DIR
 from app.health import compute_health
-from app.db_helpers import STALE_SECONDS, get_latest_node_records, _parse_ts, _safe_str
+from app.db_helpers import STALE_SECONDS, _db_path, get_latest_node_records, _parse_ts, _safe_str
+
+
+_SERVICE_ROWS_CACHE_TTL = float(os.environ.get("HARRY_SERVICE_ROWS_CACHE_SECONDS", "5"))
+_SERVICE_ROWS_CACHE: Dict[tuple[str, float, str, float], tuple[float, List[Dict[str, Any]]]] = {}
 
 
 def _safe_dict(value: Any) -> Dict[str, Any]:
@@ -108,6 +113,10 @@ def _load_specs_from_source() -> List[Dict[str, Any]]:
         if spec:
             specs.append(spec)
     return specs
+
+
+def has_explicit_service_configuration() -> bool:
+    return bool(_load_specs_from_source())
 
 
 def _extract_telemetry_services(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -255,6 +264,24 @@ def _brain_service_row() -> Dict[str, Any]:
 
 
 def build_service_rows() -> List[Dict[str, Any]]:
+    try:
+        db_mtime = Path(_db_path()).stat().st_mtime
+    except Exception:
+        db_mtime = 0.0
+
+    try:
+        service_file = _service_file()
+        service_file_mtime = service_file.stat().st_mtime if service_file.exists() else 0.0
+    except Exception:
+        service_file_mtime = 0.0
+
+    override = _service_json_override()
+    cache_key = (str(_db_path()), db_mtime, override, service_file_mtime)
+    cached = _SERVICE_ROWS_CACHE.get(cache_key)
+    now = time.monotonic()
+    if cached and (now - cached[0]) < _SERVICE_ROWS_CACHE_TTL:
+        return cached[1]
+
     latest = get_latest_node_records()
     specs = _load_specs_from_source()
 
@@ -274,4 +301,5 @@ def build_service_rows() -> List[Dict[str, Any]]:
         rows.append(brain_row)
 
     rows.sort(key=lambda r: (str(r.get("status") or ""), str(r.get("name") or "")))
+    _SERVICE_ROWS_CACHE[cache_key] = (now, rows)
     return rows

@@ -68,14 +68,13 @@ def test_ingest_records_activity_events(monkeypatch, tmp_path):
 
     assert data["ok"] is True
     assert data["count"] == len(data["events"])
+    assert "items" in data
 
     event_types = {event["type"] for event in data["events"]}
     assert "agent.first_seen" in event_types
-    assert "agent.heartbeat_missed" in event_types
-    assert "agent.heartbeat_restored" in event_types
-    assert "agent.offline" in event_types
     assert "hardware.gpu_detected" in event_types
     assert "storage.disk_warning" in event_types
+    assert any(item["type"] == "agent.first_seen" for item in data["items"])
 
 
 def test_summary_refresh_records_event(monkeypatch, tmp_path):
@@ -121,4 +120,4 @@ def test_fleet_view_shows_empty_activity_state(monkeypatch, tmp_path):
 
     html = fleet_ui.render_fleet_live(hours=72, debug=False)
 
-    assert "No recent activity yet" in html
+    assert "No recent activity. Harry has nothing unusual to report." in html

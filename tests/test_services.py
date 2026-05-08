@@ -115,8 +115,22 @@ def test_build_service_rows_uses_config_and_node_health(monkeypatch, tmp_path):
     assert jellyfin["tags"] == ["media", "video"]
     assert jellyfin["last_checked"] == now.strftime("%Y-%m-%dT%H:%M:%SZ")
     assert brain["status"] == "online"
-    assert "Household services" in html
+    assert "Watched services" in html
     assert "Jellyfin" in html
+
+
+def test_render_fleet_live_uses_small_system_status_when_no_service_config(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    with TestClient(main.app) as client:
+        assert client.post("/ingest", json=_snapshot(now)).status_code == 200
+
+    html = fleet_ui.render_fleet_live(hours=72, debug=False)
+
+    assert "System status" in html
+    assert "Watched services" not in html
+    assert "Harry Brain is online" in html
 
 
 def test_api_services_returns_service_rows(monkeypatch, tmp_path):

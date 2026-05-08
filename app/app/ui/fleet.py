@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from statistics import mean
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
+from app.activity_feed import prepare_activity_items
 from app.health import compute_health
 from app.rules import evaluate as rules_evaluate
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
-from app.service_awareness import build_service_rows
+from app.service_awareness import build_service_rows, has_explicit_service_configuration
 from app.node_metadata import node_display_name, node_meta_summary
+from app.db_helpers import _db_path
 from app.ui.db import (
     STALE_SECONDS,
     _db,
@@ -45,6 +48,11 @@ try:
     from app.advice_engine import build_advice_and_health as advice_build
 except Exception:
     advice_build = None
+
+
+_VIEW_CACHE_TTL = float(os.environ.get("HARRY_VIEW_CACHE_SECONDS", "5"))
+_NODEVIEW_CACHE: Dict[Tuple[str, int, int], Tuple[float, List["NodeView"]]] = {}
+_HIDDENNODE_CACHE: Dict[Tuple[str, int, int], Tuple[float, List["NodeView"]]] = {}
 
 
 def _display_node_name(name: str) -> str:
@@ -143,68 +151,78 @@ def _event_level_label(level: str) -> str:
     return "INFO"
 
 
-def _render_activity_body(events: List[Dict[str, Any]], loading: bool = False, error: Optional[str] = None) -> str:
+def _activity_signature(items: List[Dict[str, Any]]) -> str:
+    return "|".join(
+        f"{_safe_str(item.get('id') or '')}:{_safe_str(item.get('created_at') or '')}:{_safe_str(item.get('type') or '')}"
+        for item in items
+    )
+
+
+def _render_activity_body(
+    events: List[Dict[str, Any]],
+    loading: bool = False,
+    error: Optional[str] = None,
+    items: Optional[List[Dict[str, Any]]] = None,
+) -> str:
     if error:
         return f'<div class="activitystate error">{_html_escape(error)}</div>'
     if loading:
         return '<div class="activitystate loading">Loading recent activity…</div>'
-    if not events:
-        return '<div class="activitystate">No recent activity yet. Harry will note changes here as nodes check in.</div>'
+
+    items = items if items is not None else prepare_activity_items(events)
+    if not items:
+        return '<div class="activitystate">No recent activity. Harry has nothing unusual to report.</div>'
 
     rows: List[str] = []
-    for event in events:
-        if not isinstance(event, dict):
-            continue
-        level = _event_level_class(str(event.get("level") or "info"))
-        title = _safe_str(event.get("title") or event.get("type") or "Event")
-        message = _safe_str(event.get("message") or "")
-        created_at = _parse_ts(_safe_str(event.get("created_at") or ""))
-        ago = _ago(created_at)
-        node_id = _safe_str(event.get("node_id") or event.get("machine_id") or "")
-        node_html = ""
-        if node_id:
-            node_html = (
-                f'<a class="activitynode" href="/node/{quote(node_id)}?hours=72">'
-                f'{_html_escape(_display_node_name(node_id))}</a>'
-            )
+    for item in items:
+        tone = _safe_str(item.get("tone") or "info")
+        title = _html_escape(_safe_str(item.get("title") or "Event"))
+        detail = _html_escape(_safe_str(item.get("detail") or ""))
+        node_label = _html_escape(_safe_str(item.get("node_label") or ""))
+        relative_time = _html_escape(_safe_str(item.get("relative_time") or "unknown"))
+        badge = _html_escape(_safe_str(item.get("badge") or tone.upper()))
+        meta_bits = [bit for bit in (detail, relative_time, node_label) if bit]
+        meta = " · ".join(meta_bits)
 
         rows.append(
             f"""
-<div class="activityrow">
-  <div class="activityleft">
-    <div class="activitytitle">{_html_escape(title)}</div>
-    <div class="activitymsg">{_html_escape(message)}</div>
+<div class="timelineitem">
+  <div class="timelinelead">
+    <span class="timelinedot {tone}"></span>
+    <span class="timelineage">{relative_time}</span>
   </div>
-  <div class="activitymeta">
-    <span class="badgetxt {level}">{_event_level_label(str(event.get("level") or "info"))}</span>
-    <span class="pill neutral">{_html_escape(ago)}</span>
-    {node_html}
+  <div class="timelinebody">
+    <div class="timelineheadline">{title}</div>
+    <div class="timelinemeta">{meta if meta else ''}</div>
   </div>
+  <span class="badgetxt {tone} timelinebadge">{badge}</span>
 </div>
 """
         )
-
-    if not rows:
-        return '<div class="activitystate">No recent activity yet. Harry will note changes here as nodes check in.</div>'
 
     return "".join(rows)
 
 
 def _render_activity_section(events: List[Dict[str, Any]], loading: bool = False, error: Optional[str] = None) -> str:
-    body = _render_activity_body(events, loading=loading, error=error)
-    count_txt = "Loading…" if loading else ("Unavailable" if error else f"{len(events)} events")
+    items = prepare_activity_items(events)
+    body = _render_activity_body(events, loading=loading, error=error, items=items)
+    count_txt = "Loading…" if loading else ("Unavailable" if error else f"{len(items)} events")
+    latest_txt = "Last updated just now" if not error else "Last updated unavailable"
     return f"""
 <div class="section" id="activity-feed">
   <div class="sectionhead">
     <div>
       <div class="h2">Recent activity</div>
-      <div class="h2sub">A small feed of the things Harry noticed most recently.</div>
+      <div class="h2sub">A short timeline of the things Harry noticed most recently.</div>
+      <div class="activityfoot" data-activity-feed-updated>{_html_escape(latest_txt)}</div>
     </div>
-    <div class="pill neutral" data-activity-feed-count>{_html_escape(count_txt)}</div>
+    <div class="activityheadmeta">
+      <div class="pill neutral" data-activity-feed-count>{_html_escape(count_txt)}</div>
+    </div>
   </div>
 
   <div class="card">
-    <div class="activityfeed" data-activity-feed>
+    <div class="activityfeed" data-activity-feed data-activity-signature="{_html_escape(_activity_signature(items))}">
       {body}
     </div>
   </div>
@@ -234,35 +252,61 @@ def _service_status_label(status: str) -> str:
     return "Unknown"
 
 
-def _render_services_section() -> str:
+def _render_services_section(primary: Optional[NodeView] = None) -> str:
+    if not has_explicit_service_configuration():
+        display_name = _display_node_name(primary.node) if primary else "Harry Brain"
+        headline = _html_escape(primary.headline if primary else "Everything looks calm.")
+        status = _service_status_label((primary.health_state if primary else "healthy") or "healthy")
+        status_class = _service_status_class((primary.health_state if primary else "healthy") or "healthy")
+        last_seen = _html_escape(_ago(primary.ts) if primary else "just now")
+        return f"""
+<div class="section" id="system-status">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">System status</div>
+      <div class="h2sub">Harry Brain is online. Add configured services to let Harry watch Jellyfin, Home Assistant, Ollama, The Librarian, and other household apps.</div>
+    </div>
+    <span class="badgetxt {status_class}">{_html_escape(status)}</span>
+  </div>
+
+  <div class="card compactcard">
+    <div class="advwrap">
+      <div class="advrow">
+        <div class="advleft">
+          <div class="advnode">{_html_escape(display_name)}</div>
+          <div class="advmsg">Last heartbeat {last_seen} · {headline}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+"""
+
     try:
         rows = build_service_rows()
     except Exception:
         rows = []
 
-    if not rows:
-        body = '<div class="activitystate">No configured services yet. Add a services.json file or HARRY_SERVICES_JSON to start tracking household services.</div>'
-    else:
-        cards: List[str] = []
-        for row in rows:
-            name = _html_escape(_safe_str(row.get("name") or "Service"))
-            role = _html_escape(_safe_str(row.get("role") or row.get("type") or ""))
-            node = _html_escape(_safe_str(row.get("node") or "—"))
-            status = _safe_str(row.get("status") or "unknown")
-            status_class = _service_status_class(status)
-            status_label = _service_status_label(status)
-            last_checked = _parse_ts(_safe_str(row.get("last_checked") or ""))
-            last_checked_txt = _ago(last_checked)
-            message = _html_escape(_safe_str(row.get("message") or ""))
-            url = _safe_str(row.get("url") or "")
-            link_html = (
-                f'<a class="servicelink" href="{_html_escape(url)}" target="_blank" rel="noopener noreferrer">{_html_escape(url)}</a>'
-                if url
-                else "<span class='muted'>—</span>"
-            )
+    cards: List[str] = []
+    for row in rows:
+        name = _html_escape(_safe_str(row.get("name") or "Service"))
+        role = _html_escape(_safe_str(row.get("role") or row.get("type") or ""))
+        node = _html_escape(_safe_str(row.get("node") or "—"))
+        status = _safe_str(row.get("status") or "unknown")
+        status_class = _service_status_class(status)
+        status_label = _service_status_label(status)
+        last_checked = _parse_ts(_safe_str(row.get("last_checked") or ""))
+        last_checked_txt = _ago(last_checked)
+        message = _html_escape(_safe_str(row.get("message") or ""))
+        url = _safe_str(row.get("url") or "")
+        link_html = (
+            f'<a class="servicelink" href="{_html_escape(url)}" target="_blank" rel="noopener noreferrer">{_html_escape(url)}</a>'
+            if url
+            else "<span class='muted'>—</span>"
+        )
 
-            cards.append(
-                f"""
+        cards.append(
+            f"""
 <div class="card">
   <div class="sectionhead">
     <div>
@@ -290,20 +334,29 @@ def _render_services_section() -> str:
   <div class="subtitle">{message or "Derived from node telemetry and service configuration."}</div>
 </div>
 """
-            )
+        )
 
-        body = f'<div class="cardgrid">{"".join(cards)}</div>'
+    if not cards:
+        cards.append(
+            """
+<div class="card">
+  <div class="subtitle">No configured services yet. Add a services.json file or HARRY_SERVICES_JSON to start tracking household services.</div>
+</div>
+"""
+        )
 
     return f"""
 <div class="section" id="services-overview">
   <div class="sectionhead">
     <div>
-      <div class="h2">Household services</div>
-      <div class="h2sub">A small service-aware layer built from node telemetry and simple configuration.</div>
+      <div class="h2">Watched services</div>
+      <div class="h2sub">Household apps Harry can currently see from node telemetry or simple configuration.</div>
     </div>
   </div>
 
-  {body}
+  <div class="cardgrid">
+    {''.join(cards)}
+  </div>
 </div>
 """
 
@@ -1186,6 +1239,47 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
     )
 
 
+def _view_cache_key(hours: int) -> Tuple[str, int, int]:
+    db_file = _db_path()
+    try:
+        mtime_ns = db_file.stat().st_mtime_ns if db_file.exists() else 0
+    except Exception:
+        mtime_ns = 0
+    return (str(db_file), int(mtime_ns), int(hours))
+
+
+def _get_cached_nodeviews(hours: int) -> Optional[List[NodeView]]:
+    key = _view_cache_key(hours)
+    cached = _NODEVIEW_CACHE.get(key)
+    if not cached:
+        return None
+    ts, nodeviews = cached
+    if (time.monotonic() - ts) > _VIEW_CACHE_TTL:
+        _NODEVIEW_CACHE.pop(key, None)
+        return None
+    return nodeviews
+
+
+def _set_cached_nodeviews(hours: int, nodeviews: List[NodeView]) -> None:
+    _NODEVIEW_CACHE[_view_cache_key(hours)] = (time.monotonic(), nodeviews)
+
+
+def _get_cached_hidden_nodeviews(hours: int) -> Optional[List[NodeView]]:
+    key = _view_cache_key(hours)
+    cached = _HIDDENNODE_CACHE.get(key)
+    if not cached:
+        return None
+    ts, nodeviews = cached
+    if (time.monotonic() - ts) > _VIEW_CACHE_TTL:
+        _HIDDENNODE_CACHE.pop(key, None)
+        return None
+    return nodeviews
+
+
+def _set_cached_hidden_nodeviews(hours: int, nodeviews: List[NodeView]) -> None:
+    _HIDDENNODE_CACHE[_view_cache_key(hours)] = (time.monotonic(), nodeviews)
+
+
 def _top_action(nv: NodeView) -> Optional[Tuple[str, str]]:
     if nv.stale:
         return ("stale", f"Stopped reporting ({_ago(nv.ts)}).")
@@ -1965,6 +2059,10 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
 
 
 def build_nodeviews(hours: int = 72) -> List[NodeView]:
+    cached = _get_cached_nodeviews(hours)
+    if cached is not None:
+        return cached
+
     with _db() as conn:
         from app.ui.db import _db_has_ingest, _fetch_latest_per_node
 
@@ -1986,10 +2084,15 @@ def build_nodeviews(hours: int = 72) -> List[NodeView]:
         return (3, -nv.activity_score, -(nv.cpu_pressure_avg_72h or 0.0), nv.node)
 
     nodeviews.sort(key=sort_key)
+    _set_cached_nodeviews(hours, nodeviews)
     return nodeviews
 
 
 def build_hidden_nodeviews(hours: int = 72) -> List[NodeView]:
+    cached = _get_cached_hidden_nodeviews(hours)
+    if cached is not None:
+        return cached
+
     with _db() as conn:
         from app.ui.db import _db_has_ingest
 
@@ -2002,6 +2105,7 @@ def build_hidden_nodeviews(hours: int = 72) -> List[NodeView]:
             nodeviews.append(build_node_view(conn, node, rec, hours=hours))
 
     nodeviews.sort(key=lambda nv: nv.node)
+    _set_cached_hidden_nodeviews(hours, nodeviews)
     return nodeviews
 
 
@@ -2010,7 +2114,7 @@ def render_fleet_live(hours: int, debug: bool) -> str:
     hidden_nodeviews = build_hidden_nodeviews(hours=hours)
     brain_name = (os.environ.get("HARRY_BRAIN_NODE") or "brain").strip()
     try:
-        activity_events = get_recent_events(limit=8, sync_stale=True)
+        activity_events = get_recent_events(limit=8, sync_stale=False)
     except Exception:
         activity_events = []
 
@@ -2031,7 +2135,7 @@ def render_fleet_live(hours: int, debug: bool) -> str:
   <div class="divider"></div>
   {activity_html}
   <div class="divider"></div>
-  {_render_services_section()}
+  {_render_services_section(primary=primary)}
   <div class="divider"></div>
   {_render_fleet_trends([primary], hours=hours)}
   {hidden_html}
@@ -2092,7 +2196,7 @@ def render_fleet_live(hours: int, debug: bool) -> str:
   <div class="divider"></div>
   {activity_html}
   <div class="divider"></div>
-  {_render_services_section()}
+  {_render_services_section(primary=nodeviews[0] if nodeviews else None)}
   <div class="divider"></div>
   {fleet_map_html}
   <div class="divider"></div>
@@ -2158,8 +2262,9 @@ def _activity_polling_script() -> str:
 <script>
 (function () {
   const url = "/api/events?limit=8";
-  const POLL_MS = 12000;
+  const POLL_MS = 15000;
   let timer = null;
+  let lastSignature = "";
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -2170,66 +2275,35 @@ def _activity_polling_script() -> str:
       .replace(/'/g, "&#39;");
   }
 
-  function levelClass(level) {
-    const sev = String(level || "").toLowerCase();
-    if (sev === "error" || sev === "danger" || sev === "critical") return "bad";
-    if (sev === "warning" || sev === "warn" || sev === "degraded") return "warn";
-    if (sev === "success" || sev === "ok" || sev === "healthy") return "ok";
-    return "info";
+  function signature(items) {
+    return items.map((item) => `${item.id || ""}:${item.created_at || ""}:${item.type || ""}`).join("|");
   }
 
-  function levelLabel(level) {
-    const sev = String(level || "info").toLowerCase();
-    if (sev === "error" || sev === "danger" || sev === "critical") return "ERROR";
-    if (sev === "warning" || sev === "warn" || sev === "degraded") return "WARNING";
-    if (sev === "success" || sev === "ok" || sev === "healthy") return "SUCCESS";
-    return "INFO";
-  }
-
-  function relativeTime(date) {
-    if (!date || isNaN(date.getTime())) return "unknown";
-    const deltaMs = Date.now() - date.getTime();
-    const deltaSec = Math.floor(deltaMs / 1000);
-    if (deltaSec < 60) return "just now";
-    const mins = Math.floor(deltaSec / 60);
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    const days = Math.floor(hrs / 24);
-    return `${days}d ago`;
-  }
-
-  function activityRow(event) {
-    const level = levelClass(event && event.level);
-    const title = escapeHtml((event && (event.title || event.type)) || "Event");
-    const message = escapeHtml((event && event.message) || "");
-    const node = String((event && (event.node_id || event.machine_id)) || "").trim();
-    const nodeHtml = node
-      ? `<a class="activitynode" href="/node/${encodeURIComponent(node)}?hours=72">${escapeHtml(node)}</a>`
-      : "";
-    const createdAt = event && event.created_at ? new Date(event.created_at) : null;
-    const ago = relativeTime(createdAt);
+  function activityRow(item) {
+    const tone = String(item && item.tone || "info").toLowerCase();
+    const title = escapeHtml((item && item.title) || "Event");
+    const detail = escapeHtml((item && item.detail) || "");
+    const node = escapeHtml((item && item.node_label) || "");
+    const time = escapeHtml((item && item.relative_time) || "unknown");
+    const badge = escapeHtml((item && item.badge) || tone.toUpperCase());
+    const meta = [detail, time, node].filter(Boolean).join(" · ");
 
     return `
-<div class="activityrow">
-  <div class="activityleft">
-    <div class="activitytitle">${title}</div>
-    <div class="activitymsg">${message}</div>
+<div class="timelineitem">
+  <div class="timelinelead">
+    <span class="timelinedot ${tone}"></span>
+    <span class="timelineage">${time}</span>
   </div>
-  <div class="activitymeta">
-    <span class="badgetxt ${level}">${levelLabel(event && event.level)}</span>
-    <span class="pill neutral">${escapeHtml(ago)}</span>
-    ${nodeHtml}
+  <div class="timelinebody">
+    <div class="timelineheadline">${title}</div>
+    <div class="timelinemeta">${meta}</div>
   </div>
+  <span class="badgetxt ${tone} timelinebadge">${badge}</span>
 </div>`;
   }
 
-  function loadingState() {
-    return '<div class="activitystate loading">Loading recent activity…</div>';
-  }
-
   function emptyState() {
-    return '<div class="activitystate">No recent activity yet. Harry will note changes here as nodes check in.</div>';
+    return '<div class="activitystate">No recent activity. Harry has nothing unusual to report.</div>';
   }
 
   function errorState() {
@@ -2239,31 +2313,36 @@ def _activity_polling_script() -> str:
   async function refreshActivityFeed() {
     const body = document.querySelector("[data-activity-feed]");
     const count = document.querySelector("[data-activity-feed-count]");
+    const updated = document.querySelector("[data-activity-feed-updated]");
     if (!body) return;
 
-    if (count) {
-      count.textContent = "Refreshing…";
+    if (!lastSignature) {
+      lastSignature = body.getAttribute("data-activity-signature") || "";
     }
-
-    body.innerHTML = loadingState();
 
     try {
       const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) throw new Error(`http_${res.status}`);
 
       const data = await res.json();
-      const events = Array.isArray(data && data.events) ? data.events : [];
-      if (!events.length) {
-        body.innerHTML = emptyState();
-        if (count) count.textContent = "0 events";
-        return;
+      const items = Array.isArray(data && data.items) ? data.items : [];
+      const nextSignature = signature(items);
+      if (nextSignature !== lastSignature) {
+        body.innerHTML = items.length ? items.map(activityRow).join("") : emptyState();
+        body.setAttribute("data-activity-signature", nextSignature);
+        lastSignature = nextSignature;
       }
 
-      body.innerHTML = events.slice(0, 8).map(activityRow).join("");
-      if (count) count.textContent = `${events.length} event${events.length === 1 ? "" : "s"}`;
+      if (!items.length && !body.innerHTML.trim()) {
+        body.innerHTML = emptyState();
+      }
+
+      if (count) count.textContent = `${items.length} event${items.length === 1 ? "" : "s"}`;
+      if (updated) updated.textContent = "Last updated just now";
     } catch (err) {
-      body.innerHTML = errorState();
+      if (!body.innerHTML.trim()) body.innerHTML = errorState();
       if (count) count.textContent = "Unavailable";
+      if (updated) updated.textContent = "Last updated unavailable";
     }
   }
 
@@ -2301,7 +2380,6 @@ def render_fleet_page(hours: int, debug: bool) -> str:
 
     content = f"""
 {render_fleet_live(hours=hours, debug=debug)}
-{_fleet_polling_script(hours=hours, debug=debug)}
 {_activity_polling_script()}
 """
 
