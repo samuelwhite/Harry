@@ -1,6 +1,6 @@
 #define MyAppName "Harry Agent"
 #define MyAppVersion "2026.03.18"
-#define MyAppPublisher "Samuel White"
+#define MyAppPublisher "Harry Contributors"
 
 [Setup]
 AppId={{8D3D0A8B-3D89-4A55-9F0B-7A6A7A7E4F21}
@@ -262,7 +262,7 @@ begin
     wpWelcome,
     'Harry Brain Connection',
     'Where should this agent report?',
-    'Enter the Harry Brain IP address or hostname. Example: 192.168.7.174'
+    'Enter the Harry Brain IP address or hostname. Example: http://192.168.1.100:8789'
   );
 
   BrainPage.Add('&Brain address:', False);
@@ -296,7 +296,7 @@ begin
       MsgBox(
         'Could not reach Harry Brain at:' + #13#10 + BrainUrl + #13#10#13#10 +
         'Details: ' + TestMsg + #13#10#13#10 +
-        'Check the IP/hostname, that Brain is running, and that port 8787 is reachable.',
+        'Check the IP/hostname, that Brain is running, and that the configured port is reachable.',
         mbCriticalError, MB_OK
       );
       Result := False;

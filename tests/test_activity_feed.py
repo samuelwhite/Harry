@@ -30,14 +30,14 @@ def test_activity_feed_groups_heartbeat_recovery_pairs():
             "id": 1,
             "type": "agent.heartbeat_missed",
             "created_at": "2026-05-07T11:51:00Z",
-            "node_id": "desktop-sam",
+            "node_id": "workstation-1",
             "metadata": {"gap_seconds": 540},
         },
         {
             "id": 2,
             "type": "agent.heartbeat_restored",
             "created_at": "2026-05-07T12:00:00Z",
-            "node_id": "desktop-sam",
+            "node_id": "workstation-1",
             "metadata": {"gap_seconds": 540},
         },
     ]
@@ -57,12 +57,12 @@ def test_activity_feed_uses_present_tense_only_while_node_is_stale():
             "id": 1,
             "type": "agent.heartbeat_missed",
             "created_at": "2026-05-07T11:30:00Z",
-            "node_id": "cortex",
+            "node_id": "compute-node-1",
             "metadata": {"age_seconds": 3600},
         }
     ]
     current_nodes = {
-        "cortex": {
+        "compute-node-1": {
             "ts": "2026-05-07T10:45:00Z",
             "payload": {"agent_status": {"state": "healthy", "ok": True}},
         }
@@ -70,7 +70,7 @@ def test_activity_feed_uses_present_tense_only_while_node_is_stale():
 
     items = prepare_activity_items(events, now=now, current_nodes=current_nodes)
 
-    assert items[0]["title"] == "cortex is not checking in right now"
+    assert items[0]["title"] == "compute-node-1 is not checking in right now"
     assert items[0]["detail"] == "No response for about 1 hour"
 
 
@@ -81,13 +81,13 @@ def test_activity_feed_rewrites_recovered_offline_copy_as_historical():
             "id": 1,
             "type": "agent.offline",
             "created_at": "2026-05-07T11:40:00Z",
-            "node_id": "jarvis",
-            "message": "jarvis reported state error.",
+            "node_id": "media-server-1",
+            "message": "media-server-1 reported state error.",
             "metadata": {"state": "error"},
         }
     ]
     current_nodes = {
-        "jarvis": {
+        "media-server-1": {
             "ts": "2026-05-07T11:59:00Z",
             "payload": {"agent_status": {"state": "healthy", "ok": True}},
         }
@@ -95,8 +95,8 @@ def test_activity_feed_rewrites_recovered_offline_copy_as_historical():
 
     items = prepare_activity_items(events, now=now, current_nodes=current_nodes)
 
-    assert items[0]["title"] == "jarvis reported trouble earlier"
-    assert items[0]["detail"] == "jarvis reported state error."
+    assert items[0]["title"] == "media-server-1 reported trouble earlier"
+    assert items[0]["detail"] == "media-server-1 reported state error."
 
 
 def test_activity_feed_suppresses_old_missed_event_after_recovery():
@@ -106,19 +106,19 @@ def test_activity_feed_suppresses_old_missed_event_after_recovery():
             "id": 1,
             "type": "agent.heartbeat_restored",
             "created_at": "2026-05-07T11:55:00Z",
-            "node_id": "cortex",
+            "node_id": "compute-node-1",
             "metadata": {"gap_seconds": 900},
         },
         {
             "id": 2,
             "type": "agent.heartbeat_missed",
             "created_at": "2026-05-07T10:30:00Z",
-            "node_id": "cortex",
+            "node_id": "compute-node-1",
             "metadata": {"age_seconds": 900},
         },
     ]
     current_nodes = {
-        "cortex": {
+        "compute-node-1": {
             "ts": "2026-05-07T11:59:00Z",
             "payload": {"agent_status": {"state": "healthy", "ok": True}},
         }
@@ -137,7 +137,7 @@ def test_activity_feed_uses_unknown_recovery_copy_when_duration_missing():
             "id": 1,
             "type": "agent.heartbeat_restored",
             "created_at": "2026-05-07T11:59:00Z",
-            "node_id": "cortex",
+            "node_id": "compute-node-1",
             "metadata": {},
         }
     ]
@@ -154,7 +154,7 @@ def test_activity_feed_never_says_recovered_after_just_now():
             "id": 1,
             "type": "agent.heartbeat_restored",
             "created_at": "2026-05-07T12:00:00Z",
-            "node_id": "cortex",
+            "node_id": "compute-node-1",
             "metadata": {"gap_seconds": 10},
         }
     ]

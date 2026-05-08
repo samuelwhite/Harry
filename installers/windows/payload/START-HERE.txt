@@ -22,7 +22,7 @@ Installation
 5. When prompted, enter the Harry Brain address.
 
 Example:
-http://192.168.1.20:8787
+http://192.168.1.100:8789
 
 
 What the installer does

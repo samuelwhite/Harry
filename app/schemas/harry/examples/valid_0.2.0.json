@@ -1,10 +1,10 @@
 {
   "schema_version": "0.2.0",
-  "node": "jarvis",
+  "node": "example-node",
   "ts": "2026-02-26T21:15:00Z",
 
   "facts": {
-    "hostname": "jarvis",
+    "hostname": "example-node",
     "model": "Dell OptiPlex 7050 Micro",
     "cpu": "Intel Core i5-7500T",
     "cpu_cores": 4,
@@ -100,7 +100,7 @@
   "advice": [
     {
       "id": "disk_physical_warn_sdb",
-      "node": "jarvis",
+      "node": "example-node",
       "category": "storage",
       "severity": "warn",
       "message": "Data disk is over 70% utilised.",

@@ -107,15 +107,14 @@ def node_display_name(node: str) -> str:
 
     if (os.environ.get("HARRY_SCREENSHOT_MODE") or "").strip().lower() in ("1", "true", "yes", "on"):
         aliases = {
-            "DESKTOP-8QV3E94": "compute-node-1",
-            "Desktop-Sam": "gaming-pc-1",
-            "DESKTOP-SAM": "gaming-pc-1",
-            "alfred": "server-1",
-            "cortex": "ai-node-1",
-            "jarvis": "compute-node-2",
-            "lois-edge": "edge-node-1",
+            "DESKTOP-EXAMPLE": "workstation-1",
+            "WORKSTATION-01": "workstation-1",
+            "media-server": "media-server-1",
+            "ai-node": "ai-node-1",
+            "nas-box": "nas-1",
+            "home-assistant-host": "automation-node-1",
             "pi-kiosk": "kiosk-1",
-            "pihole": "network-node-1",
+            "network-gateway": "network-node-1",
         }
         return aliases.get(node, node)
 

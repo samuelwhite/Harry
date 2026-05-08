@@ -241,9 +241,9 @@ if (-not (Test-Path $ConfigPath)) {
     Write-Host "Enter the Harry Brain address."
     Write-Host "This is the full address of the machine running Harry Brain."
     Write-Host "Examples:"
-    Write-Host "  192.168.1.20"
-    Write-Host "  192.168.1.20:8787"
-    Write-Host "  http://192.168.1.20:8787"
+    Write-Host "  192.168.1.100"
+    Write-Host "  192.168.1.100:8789"
+    Write-Host "  http://192.168.1.100:8789"
     Write-Host ""
 
     $defaultBrain = "http://harry-brain:8787"

@@ -15,10 +15,10 @@ def test_node_metadata_loads_from_json_and_formats_summary(monkeypatch, tmp_path
           "nodes": [
             {
               "node": "node-1",
-              "display_name": "Alfred",
-              "role": "AI Core",
-              "character": "Alfred",
-              "location": "Server Stack",
+              "display_name": "Example Node",
+              "role": "Media Server",
+              "character": "NAS",
+              "location": "Rack Shelf",
               "tags": ["gpu", "llm", "automation"]
             }
           ]
@@ -28,10 +28,10 @@ def test_node_metadata_loads_from_json_and_formats_summary(monkeypatch, tmp_path
 
     meta = nm.load_node_metadata()
 
-    assert meta["node-1"]["display_name"] == "Alfred"
-    assert meta["node-1"]["role"] == "AI Core"
-    assert nm.node_display_name("node-1") == "Alfred"
-    assert nm.node_meta_summary("node-1") == "AI Core · Alfred · Server Stack · gpu, llm, automation"
+    assert meta["node-1"]["display_name"] == "Example Node"
+    assert meta["node-1"]["role"] == "Media Server"
+    assert nm.node_display_name("node-1") == "Example Node"
+    assert nm.node_meta_summary("node-1") == "Media Server · NAS · Rack Shelf · gpu, llm, automation"
     assert nm.node_display_name("missing") == "missing"
 
 
@@ -44,10 +44,10 @@ def test_inventory_rows_include_node_metadata(monkeypatch, tmp_path):
         """
         {
           "node-1": {
-            "display_name": "Alfred",
-            "role": "AI Core",
-            "character": "Alfred",
-            "location": "Server Stack",
+            "display_name": "Example Node",
+            "role": "Media Server",
+            "character": "NAS",
+            "location": "Rack Shelf",
             "tags": ["gpu", "llm", "automation"]
           }
         }
@@ -72,9 +72,9 @@ def test_inventory_rows_include_node_metadata(monkeypatch, tmp_path):
     )
 
     row = rows[0]
-    assert row["display_name"] == "Alfred"
-    assert row["meta"] == "AI Core · Alfred · Server Stack · gpu, llm, automation"
-    assert "Alfred" in inventory_ui._inventory_md(rows)
+    assert row["display_name"] == "Example Node"
+    assert row["meta"] == "Media Server · NAS · Rack Shelf · gpu, llm, automation"
+    assert "Example Node" in inventory_ui._inventory_md(rows)
 
 
 def test_node_detail_uses_display_name_and_metadata(monkeypatch):
@@ -85,10 +85,10 @@ def test_node_detail_uses_display_name_and_metadata(monkeypatch):
           "nodes": [
             {
               "node": "node-1",
-              "display_name": "Alfred",
-              "role": "AI Core",
-              "character": "Alfred",
-              "location": "Server Stack",
+              "display_name": "Example Node",
+              "role": "Media Server",
+              "character": "NAS",
+              "location": "Rack Shelf",
               "tags": ["gpu", "llm", "automation"]
             }
           ]
@@ -107,6 +107,5 @@ def test_node_detail_uses_display_name_and_metadata(monkeypatch):
 
     html = node_ui.render_node_detail("node-1", hours=72)
 
-    assert "Alfred" in html
-    assert "AI Core · Alfred · Server Stack · gpu, llm, automation" in html
-
+    assert "Example Node" in html
+    assert "Media Server · NAS · Rack Shelf · gpu, llm, automation" in html

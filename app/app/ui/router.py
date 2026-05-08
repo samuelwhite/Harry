@@ -352,13 +352,13 @@ def _brain_url_warning(url: str) -> str | None:
     if " " in lowered:
         return (
             "The current Brain address does not look valid. "
-            "It should usually look like http://192.168.x.x:8787"
+            "It should usually look like http://192.168.1.100:8789"
         )
 
     if not (lowered.startswith("http://") or lowered.startswith("https://")):
         return (
             "The current Brain address does not look valid. "
-            "It should usually look like http://192.168.x.x:8787"
+            "It should usually look like http://192.168.1.100:8789"
         )
 
     return None
@@ -452,7 +452,7 @@ def downloads_page(request: Request) -> HTMLResponse:
     <div class="subtitle" style="margin-top:10px;">
       On Windows, open <code>Command Prompt</code>, run <code>ipconfig</code>,
       find your active adapter's <code>IPv4 Address</code>, then use
-      <code>http://YOUR-IP:8787</code> in the installer.
+      <code>HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789</code> for the address your agents should reach.
     </div>
   </div>
 </section>
@@ -470,7 +470,7 @@ def downloads_page(request: Request) -> HTMLResponse:
         Copy
       </button>
     </div>
-    <div class="subtitle">Copy this full Brain address into the installer when prompted on another machine on your network.</div>
+    <div class="subtitle">Copy this full Brain address into the installer when prompted on another machine on your network. If needed, set <code>HARRY_PUBLIC_BASE_URL=http://&lt;brain-ip&gt;:8789</code> so agents use the correct external address.</div>
 
     <div style="height:12px;"></div>
 
@@ -571,7 +571,7 @@ def downloads_page(request: Request) -> HTMLResponse:
     <div class="advrow">
       <div class="advleft">
         <div class="advnode">4. Find IPv4 Address</div>
-        <div class="advmsg">Use the <code>IPv4 Address</code> value in the installer, in the format <code>http://YOUR-IP:8787</code>.</div>
+        <div class="advmsg">Use the <code>IPv4 Address</code> value in the installer, in the format <code>http://192.168.1.100:8789</code>. Replace it with the real address your agents can reach.</div>
       </div>
     </div>
   </div>

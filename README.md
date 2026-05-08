@@ -4,9 +4,6 @@ Hardware awareness for small infrastructure environments.
 
 Experimental • Home Lab Tool • Quiet Infrastructure
 
-![Release](https://img.shields.io/github/v/release/samuelwhite/Harry)
-![Licence](https://img.shields.io/github/license/samuelwhite/Harry)
-
 ![Harry Fleet](assets/harry_dashboard.png)
 ![Harry Nodes](assets/harry_dashboard_2.png)
 
@@ -26,9 +23,7 @@ If it runs quietly for years, we’ve won. **Boring is good.**
 
 ## 🪟 Windows (Easiest Setup)
 
-Download the latest installer:
-
-https://github.com/samuelwhite/Harry/releases
+Download the latest installer from this repository's Releases page.
 
 Run:
 
@@ -53,14 +48,15 @@ Your machine will automatically register as the first node.
 
 ## 🐧 Linux Brain (Most Stable)
 
-git clone https://github.com/samuelwhite/Harry.git
+git clone <repo-url>
 cd Harry
 ./install.sh
 
 After install:
 
-UI:     http://<host>:8787
-Health: http://<host>:8787/health
+UI:     http://localhost:8787
+Health: http://localhost:8787/health
+Public agent address example: HARRY_PUBLIC_BASE_URL=http://<brain-ip>:8789
 
 ---
 
@@ -80,7 +76,7 @@ It provides:
 
 ### Linux Agent
 
-export HARRY_BASE_URL="http://<brain-host>:8787"
+export HARRY_BASE_URL="http://<brain-ip>:8789"
 
 curl -fsSL "$HARRY_BASE_URL/scripts/install-agent.sh" | sudo -E bash
 
@@ -142,8 +138,11 @@ Downloads
 
 Harry Agents must reach the Brain over HTTP.
 
-Default:
-Port: 8787
+Default Brain listen port:
+8787
+
+Example public agent-facing address:
+HARRY_PUBLIC_BASE_URL=http://<brain-ip>:8789
 
 Requirements:
 
@@ -157,7 +156,7 @@ Different subnets?
 
 Test connectivity (from the machine you're installing an Agent on):
 
-Test-NetConnection <brain-ip> -Port 8787
+Test-NetConnection <brain-ip> -Port 8789
 
 ---
 

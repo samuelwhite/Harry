@@ -44,7 +44,7 @@ Quick Start
 
 Example Brain URL
 
-http://192.168.1.20:8787
+http://192.168.1.100:8789
 
 
 Installation Result
@@ -89,5 +89,5 @@ Harry — HARdware Review buddY
 
 Hardware awareness for small infrastructure environments.
 
-GitHub:
-https://github.com/samuelwhite/Harry
+Repository:
+Use this repository's Releases page or source checkout.

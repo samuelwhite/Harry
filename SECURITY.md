@@ -14,8 +14,7 @@ The project is experimental and evolving.
 
 If you discover a security issue, please report it privately rather than opening a public issue.
 
-Contact:
-Samuel James White
+Please use a private GitHub security advisory or the repository maintainer contact listed on the hosting platform.
 
 Please include:
 

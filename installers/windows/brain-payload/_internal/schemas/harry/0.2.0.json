@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://whitefamilyhome.net/schemas/harry/0.2.0.json",
+  "$id": "https://harry.example/schemas/harry/0.2.0.json",
   "title": "Harry Snapshot Schema v0.2.0",
   "type": "object",
   "additionalProperties": false,

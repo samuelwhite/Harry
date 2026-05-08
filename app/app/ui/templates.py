@@ -1672,7 +1672,6 @@ def render_shell(
 ) -> str:
     eyebrow = _page_eyebrow(active_page)
     top_nav = _render_top_nav(sidebar_sections, active_page=active_page)
-    section_nav = _render_section_nav(sidebar_sections, active_page=active_page)
     body = f"""
 <div class="shell">
   <main class="main">
@@ -1683,7 +1682,7 @@ def render_shell(
             <div class="brandmark">HR</div>
             <div class="brandcopy">
               <div class="brand-title">HARRY</div>
-              <div class="brand-sub">White Family platform operations</div>
+              <div class="brand-sub">Home infrastructure dashboard</div>
             </div>
           </div>
           <div class="topbar-right">
@@ -1699,7 +1698,6 @@ def render_shell(
             <div class="eyebrow">{_html_escape(eyebrow)}</div>
             <div class="h1">{_html_escape(page_title)}</div>
             <div class="sub">{page_subtitle}</div>
-            {f'<div class="sectionnav">{section_nav}</div>' if section_nav else ''}
           </div>
         </div>
       </div>

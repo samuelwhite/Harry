@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${HARRY_BASE_URL:?Set HARRY_BASE_URL, e.g. http://192.168.1.10:8787}"
+: "${HARRY_BASE_URL:?Set HARRY_BASE_URL, e.g. http://<brain-ip>:8789}"
 
 AGENT_DIR="${HARRY_AGENT_DIR:-/opt/harry/agent}"
 AGENT_PATH="${AGENT_DIR}/harry_agent.sh"
