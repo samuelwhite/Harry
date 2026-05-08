@@ -6,9 +6,14 @@ AGENT_PATH="${AGENT_DIR}/harry_agent.sh"
 TMP_AGENT="$(mktemp /tmp/harry_agent_install.XXXXXX.sh)"
 ALLOW_REPOINT="${HARRY_ALLOW_REPOINT:-0}"
 HARRY_BASE_URL="${HARRY_BASE_URL:-}"
+HARRY_INGEST_URL="${HARRY_INGEST_URL:-}"
+HARRY_URL="${HARRY_URL:-}"
+HARRY_PUBLIC_PORT="${HARRY_PUBLIC_PORT:-8789}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGED_AGENT_SCRIPT="$SCRIPT_DIR/harry_agent.sh"
 DEV_AGENT_SCRIPT="$SCRIPT_DIR/../agent/harry_agent.sh"
+DISCOVERY_HELPER="$SCRIPT_DIR/brain_discovery.py"
+PYTHON="${PYTHON:-python3}"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1
@@ -114,6 +119,158 @@ fi
 ensure_required_runtime
 install_optional_enrichers
 
+brain_public_port() {
+  local port="${HARRY_PUBLIC_PORT:-8789}"
+  if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then
+    echo "$port"
+  else
+    echo 8789
+  fi
+}
+
+normalize_brain_url() {
+  local raw="${1:-}"
+  "$PYTHON" "$DISCOVERY_HELPER" normalize "$raw" --default-port "$(brain_public_port)"
+}
+
+probe_brain_url() {
+  local raw="${1:-}"
+  local timeout="${2:-1.2}"
+  "$PYTHON" "$DISCOVERY_HELPER" probe "$raw" --timeout "$timeout"
+}
+
+discover_brain_urls() {
+  "$PYTHON" "$DISCOVERY_HELPER" discover --port "$(brain_public_port)" --timeout 1.2 --workers 32
+}
+
+prompt_manual_brain_url() {
+  local input=""
+  local default_hint="http://<brain-ip>:$(brain_public_port)"
+
+  if [ ! -t 0 ]; then
+    echo "ERROR: Unable to auto-discover Harry Brain and no interactive terminal is available." >&2
+    echo "Set HARRY_BASE_URL or HARRY_INGEST_URL explicitly, or rerun interactively and enter the Brain address." >&2
+    return 1
+  fi
+
+  echo "==> Harry Brain could not be auto-discovered."
+  echo "    Enter the Brain address that other machines can reach."
+  echo "    Examples:"
+  echo "      192.168.1.100"
+  echo "      192.168.1.100:8789"
+  echo "      http://192.168.1.100:8789"
+  echo
+  read -r -p "Harry Brain address [${default_hint}]: " input || true
+  input="${input:-}"
+  if [ -z "$input" ]; then
+    echo "ERROR: No Brain address provided." >&2
+    return 1
+  fi
+
+  if ! normalized="$(normalize_brain_url "$input" 2>/dev/null)"; then
+    echo "ERROR: Invalid Harry Brain address." >&2
+    return 1
+  fi
+
+  if ! probe_brain_url "$normalized" >/dev/null 2>&1; then
+    echo "ERROR: Harry Brain is not reachable at ${normalized}." >&2
+    echo "Set HARRY_BASE_URL or HARRY_INGEST_URL explicitly if discovery cannot find it." >&2
+    return 1
+  fi
+
+  HARRY_BASE_URL="$normalized"
+  echo "==> Using manually entered Harry Brain at ${HARRY_BASE_URL}"
+  return 0
+}
+
+resolve_brain_url() {
+  local discovered=()
+  local line
+  local normalized
+
+  if [ -n "${HARRY_BASE_URL:-}" ]; then
+    if ! normalized="$(normalize_brain_url "$HARRY_BASE_URL" 2>/dev/null)"; then
+      echo "ERROR: HARRY_BASE_URL is invalid." >&2
+      return 1
+    fi
+    HARRY_BASE_URL="$normalized"
+    HARRY_INGEST_URL="${HARRY_INGEST_URL:-$HARRY_BASE_URL/ingest}"
+    return 0
+  fi
+
+  if [ -n "${HARRY_INGEST_URL:-}" ]; then
+    if [[ "$HARRY_INGEST_URL" == */ingest ]]; then
+      HARRY_BASE_URL="${HARRY_INGEST_URL%/ingest}"
+    else
+      HARRY_BASE_URL="${HARRY_INGEST_URL%/*}"
+    fi
+    if ! normalized="$(normalize_brain_url "$HARRY_BASE_URL" 2>/dev/null)"; then
+      echo "ERROR: HARRY_INGEST_URL is invalid." >&2
+      return 1
+    fi
+    HARRY_BASE_URL="$normalized"
+    HARRY_INGEST_URL="${HARRY_INGEST_URL:-$HARRY_BASE_URL/ingest}"
+    return 0
+  fi
+
+  if [ -n "${HARRY_URL:-}" ]; then
+    if [[ "$HARRY_URL" == */ingest ]]; then
+      HARRY_BASE_URL="${HARRY_URL%/ingest}"
+    else
+      HARRY_BASE_URL="${HARRY_URL%/*}"
+    fi
+    if ! normalized="$(normalize_brain_url "$HARRY_BASE_URL" 2>/dev/null)"; then
+      echo "ERROR: HARRY_URL is invalid." >&2
+      return 1
+    fi
+    HARRY_BASE_URL="$normalized"
+    HARRY_INGEST_URL="${HARRY_INGEST_URL:-$HARRY_BASE_URL/ingest}"
+    return 0
+  fi
+
+  while IFS= read -r line; do
+    [ -n "$line" ] && discovered+=("$line")
+  done < <(discover_brain_urls || true)
+
+  if [ "${#discovered[@]}" -eq 1 ]; then
+    HARRY_BASE_URL="${discovered[0]}"
+    HARRY_INGEST_URL="${HARRY_BASE_URL%/}/ingest"
+    echo "==> Auto-discovered Harry Brain at ${HARRY_BASE_URL}"
+    return 0
+  fi
+
+  if [ "${#discovered[@]}" -gt 1 ]; then
+    if [ ! -t 0 ]; then
+      echo "ERROR: Multiple Harry Brain instances were discovered, but the installer is non-interactive." >&2
+      printf 'Discovered:\n' >&2
+      printf '  - %s\n' "${discovered[@]}" >&2
+      echo "Set HARRY_BASE_URL explicitly or rerun interactively to choose one." >&2
+      return 1
+    fi
+
+    echo "==> Multiple Harry Brain instances were discovered:"
+    local i=1
+    for line in "${discovered[@]}"; do
+      printf '  %s) %s\n' "$i" "$line"
+      i=$((i + 1))
+    done
+    echo "  m) Enter a Brain address manually"
+    read -r -p "Choose a Brain [1]: " choice || true
+    choice="${choice:-1}"
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#discovered[@]}" ]; then
+      HARRY_BASE_URL="${discovered[$((choice - 1))]}"
+      HARRY_INGEST_URL="${HARRY_BASE_URL%/}/ingest"
+      echo "==> Using discovered Harry Brain at ${HARRY_BASE_URL}"
+      return 0
+    fi
+
+    prompt_manual_brain_url
+    return $?
+  fi
+
+  prompt_manual_brain_url
+}
+
 EXISTING_BASE_URL="$(current_configured_base_url || true)"
 if [ -n "${HARRY_BASE_URL:-}" ] && [ -n "${EXISTING_BASE_URL:-}" ] && [ "${EXISTING_BASE_URL%/}" != "${HARRY_BASE_URL%/}" ]; then
   if [ "$ALLOW_REPOINT" != "1" ]; then
@@ -128,6 +285,10 @@ if [ -n "${HARRY_BASE_URL:-}" ] && [ -n "${EXISTING_BASE_URL:-}" ] && [ "${EXIST
   echo "WARNING: Repoint override accepted." >&2
   echo "         Existing: ${EXISTING_BASE_URL}" >&2
   echo "         New:      ${HARRY_BASE_URL}" >&2
+fi
+
+if ! resolve_brain_url; then
+  exit 1
 fi
 
 mkdir -p "$AGENT_DIR"
