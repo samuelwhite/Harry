@@ -592,12 +592,12 @@ def _downloads_fallback_help_html() -> str:
     return """
 <section class="section" id="downloads-warning">
   <details class="card" style="padding:18px 20px;">
-    <summary style="cursor:pointer; list-style:none; font-weight:700;">Need help finding the address?</summary>
+    <summary style="font-weight:700;">Need help finding the address?</summary>
     <div class="subtitle" style="margin-top:12px;">Installers will try to discover Harry Brain automatically.</div>
     <div class="subtitle" style="margin-top:10px;">Windows: run <code>ipconfig</code>.</div>
     <div class="subtitle" style="margin-top:8px;">Linux/macOS: run <code>hostname -I</code>.</div>
     <div class="subtitle" style="margin-top:10px;">Use the IPv4 address that other machines on your network can reach.</div>
-    <div class="subtitle" style="margin-top:10px;">Example: <code>http://192.168.1.100:8789</code></div>
+    <div class="subtitle" style="margin-top:10px;">Example format: <code>http://&lt;your-brain-ip&gt;:8789</code></div>
   </details>
 </section>
 """
@@ -607,10 +607,10 @@ def _downloads_advanced_help_html() -> str:
     return """
 <section class="section" id="downloads-advanced">
   <details class="card" style="padding:18px 20px;">
-    <summary style="cursor:pointer; list-style:none; font-weight:700;">Advanced configuration</summary>
-    <div class="subtitle" style="margin-top:12px;">Use these if discovery does not pick the right address:</div>
-    <div class="subtitle" style="margin-top:10px;"><code>HARRY_PUBLIC_BASE_URL=http://192.168.1.100:8789</code></div>
-    <div class="subtitle" style="margin-top:8px;"><code>HARRY_BRAIN_LAN_IP=192.168.1.100</code> with <code>HARRY_PUBLIC_PORT=8789</code></div>
+    <summary style="font-weight:700;">Advanced configuration</summary>
+    <div class="subtitle" style="margin-top:12px;">Only use this if you want to set the address manually.</div>
+    <div class="subtitle" style="margin-top:10px;"><code>HARRY_PUBLIC_BASE_URL=http://&lt;your-brain-ip&gt;:8789</code></div>
+    <div class="subtitle" style="margin-top:8px;"><code>HARRY_BRAIN_LAN_IP=YOUR-BRAIN-IP</code> with <code>HARRY_PUBLIC_PORT=8789</code></div>
   </details>
 </section>
 """

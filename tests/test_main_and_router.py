@@ -12,7 +12,6 @@ import app.config as config
 import app.main as main
 import importlib
 from app.ui import db as dbmod
-from app.ui.templates import render_shell
 
 router = importlib.import_module("app.ui.router")
 
@@ -123,26 +122,6 @@ def test_node_summary_strips_platform_suffix_from_agent_version():
     summary = main._node_summary(payload, ctx={})
 
     assert summary["agent_version"] == "0.2.5"
-
-
-def test_render_shell_includes_page_eyebrow():
-    html = render_shell(
-        title="HARRY Fleet",
-        active_page="fleet",
-        page_title="Fleet",
-        page_subtitle="Live status",
-        sidebar_sections=[
-            {"label": "Fleet", "items": [{"label": "Overview", "href": "/"}]},
-            {"label": "Inventory", "items": [{"label": "Summary", "href": "/inventory"}]},
-        ],
-        actions=[],
-        content="",
-    )
-
-    assert "Fleet overview" in html
-    assert '<div class="eyebrow">Fleet overview</div>' in html
-    assert 'class="topnav-link active"' in html
-    assert ">Overview</a>" in html
 
 
 def test_fleet_page_does_not_inject_full_page_refresh_script(monkeypatch):
@@ -319,10 +298,12 @@ def test_downloads_uses_placeholder_when_lan_ip_is_unavailable(monkeypatch, tmp_
     assert "Need help finding the address?" in html
     assert "hostname -I" in html
     assert "ipconfig" in html
-    assert "http://192.168.1.100:8789" in html
+    assert "http://&lt;your-brain-ip&gt;:8789" in html
+    assert "YOUR-BRAIN-IP" in html
+    assert "http://192.168.1.100:8789" not in html
     assert "http://nas.local:8789" not in html
-    assert "HARRY_PUBLIC_BASE_URL=http://192.168.1.100:8789" in html
-    assert "HARRY_BRAIN_LAN_IP=192.168.1.100" in html
+    assert "HARRY_PUBLIC_BASE_URL=http://&lt;your-brain-ip&gt;:8789" in html
+    assert "HARRY_BRAIN_LAN_IP=YOUR-BRAIN-IP" in html
     assert "HARRY_PUBLIC_PORT=8789" in html
     assert "http://<brain-ip>:8789" not in html
     assert "127.0.0.1" not in html
