@@ -1,8 +1,11 @@
 import json
 import os
+import re
 import socket
 import subprocess
 import time
+import sys
+from pathlib import Path
 import urllib.error
 import urllib.request
 
@@ -16,6 +19,7 @@ AGENT_VERSION = "0.2.5"
 SCHEMA_VERSION = "0.2.3"
 CONFIG_PATH = r"C:\ProgramData\Harry\agent_config.json"
 POLL_SECONDS = 30
+UPDATE_SCRIPT_NAME = "update_agent.ps1"
 
 
 def iso_now() -> str:
@@ -29,6 +33,136 @@ def load_config() -> dict:
             return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _version_key(value: str | None) -> tuple[int, ...]:
+    raw = (value or "").strip()
+    if not raw or raw.lower() == "unknown":
+        return ()
+
+    core = re.split(r"[-+]", raw, maxsplit=1)[0]
+    parts: list[int] = []
+    for chunk in core.split("."):
+        match = re.search(r"\d+", chunk)
+        if not match:
+            return ()
+        parts.append(int(match.group(0)))
+    return tuple(parts)
+
+
+def _is_newer_version(candidate: str | None, current: str | None) -> bool:
+    c = _version_key(candidate)
+    cur = _version_key(current)
+    return bool(c and cur and c > cur)
+
+
+def _install_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _update_script_path() -> Path:
+    return _install_root() / UPDATE_SCRIPT_NAME
+
+
+def _fetch_brain_discovery() -> dict | None:
+    discover_url = f"{BRAIN_URL.rstrip('/')}/discover"
+    req = urllib.request.Request(
+        discover_url,
+        headers={"Accept": "application/json"},
+        method="GET",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return None
+
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+    if data.get("service") != "harry-brain" or data.get("ok") is not True:
+        return None
+    return data
+
+
+def _launch_windows_updater(update_url: str) -> bool:
+    script = _update_script_path()
+    if not script.exists():
+        print(f"Windows updater not found at {script}")
+        return False
+
+    cmd = [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(script),
+        "-BrainUrl",
+        BRAIN_URL,
+        "-AgentDownloadUrl",
+        update_url,
+        "-CurrentVersion",
+        AGENT_VERSION,
+    ]
+
+    try:
+        creationflags = 0
+        creationflags |= getattr(subprocess, "DETACHED_PROCESS", 0)
+        creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        subprocess.Popen(
+            cmd,
+            cwd=str(script.parent),
+            creationflags=creationflags,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print(f"Windows updater scheduled from {update_url}")
+        return True
+    except Exception as exc:
+        print(f"Windows updater launch failed: {exc}")
+        return False
+
+
+def maybe_self_update() -> bool:
+    if os.environ.get("HARRY_SKIP_SELF_UPDATE") == "1":
+        return False
+    if os.environ.get("HARRY_SELF_UPDATE", "1") == "0":
+        return False
+    if os.name != "nt":
+        return False
+
+    discovery = _fetch_brain_discovery()
+    if not discovery:
+        return False
+
+    remote_agent_version = str(discovery.get("agent_version") or "").strip()
+    if not remote_agent_version or remote_agent_version.lower() == "unknown":
+        return False
+
+    if not _is_newer_version(remote_agent_version, AGENT_VERSION):
+        return False
+
+    update_url = str(
+        discovery.get("agent_download_url")
+        or f"{BRAIN_URL.rstrip('/')}/downloads/windows-agent-exe"
+    ).strip()
+    if not update_url:
+        return False
+
+    print(
+        "Windows agent update available:",
+        f"local={AGENT_VERSION}",
+        f"remote={remote_agent_version}",
+    )
+    return _launch_windows_updater(update_url)
 
 
 config = load_config()
@@ -445,6 +579,10 @@ def main() -> None:
     print("Harry Windows Agent starting")
     print("Brain:", BRAIN_URL)
     print("Endpoint:", ENDPOINT)
+
+    if maybe_self_update():
+        print("Windows agent update started; exiting to let the updater replace the binary.")
+        return
 
     while True:
         payload = build_payload()

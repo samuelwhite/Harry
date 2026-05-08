@@ -835,6 +835,26 @@ def download_windows_agent() -> FileResponse:
     )
 
 
+@router.get("/downloads/windows-agent-exe")
+def download_windows_agent_exe() -> FileResponse:
+    candidates = [
+        Path(__file__).resolve().parents[2] / "dist" / "windows" / "harry_agent.exe",
+        Path(__file__).resolve().parents[3] / "agent" / "windows" / "harry_agent.exe",
+    ]
+    for path in candidates:
+        if path.exists() and path.is_file():
+            return FileResponse(
+                path=str(path),
+                filename="harry_agent.exe",
+                media_type="application/octet-stream",
+            )
+
+    raise HTTPException(
+        status_code=404,
+        detail="Windows agent binary not found. Expected dist/windows/harry_agent.exe.",
+    )
+
+
 @router.get("/downloads/linux-agent")
 def download_linux_agent() -> FileResponse:
     path = _downloads_dir() / "HarryAgentInstall.sh"

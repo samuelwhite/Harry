@@ -11,6 +11,7 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "Get-DiscoveryCandidates" in text
         assert "Discover-HarryBrain" in text
         assert "Test-BrainDiscoveryCandidate" in text
+        assert "update_agent.ps1" in text
         assert "harry.local" in text
         assert "harry-brain.local" in text
         assert "/discover" in text

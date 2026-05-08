@@ -356,6 +356,7 @@ $AgentExe = Join-Path $InstallRoot "harry_agent.exe"
 $ConfigPath = Join-Path $InstallRoot "agent_config.json"
 $ServiceExe = Join-Path $InstallRoot "HarryAgentService.exe"
 $ServiceXml = Join-Path $InstallRoot "HarryAgentService.xml"
+$UpdaterScript = Join-Path $InstallRoot "update_agent.ps1"
 $WrapperLog = Join-Path $InstallRoot "HarryAgentService.wrapper.log"
 $OutLog = Join-Path $InstallRoot "HarryAgentService.out.log"
 $ErrLog = Join-Path $InstallRoot "HarryAgentService.err.log"
@@ -390,6 +391,15 @@ if (Test-Path ".\HarryAgentService.exe") {
 } else {
     Write-Host "ERROR: HarryAgentService.exe not found in the package folder."
     Write-Host "Expected at: $scriptDir\HarryAgentService.exe"
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+if (Test-Path ".\update_agent.ps1") {
+    Copy-Item ".\update_agent.ps1" $UpdaterScript -Force
+} else {
+    Write-Host "ERROR: update_agent.ps1 not found in the package folder."
+    Write-Host "Expected at: $scriptDir\update_agent.ps1"
     Read-Host "Press Enter to exit"
     exit 1
 }

@@ -17,6 +17,7 @@ mkdir -p "$INSTALLERS"
 
 echo "==> Copying Windows support files"
 cp "$SRC/install_agent.ps1" "$DIST/install_agent.ps1"
+cp "$SRC/update_agent.ps1" "$DIST/update_agent.ps1"
 cp "$SRC/uninstall_agent.ps1" "$DIST/uninstall_agent.ps1"
 cp "$SRC/agent_config.sample.json" "$DIST/agent_config.sample.json"
 cp "$SRC/README.txt" "$DIST/README.txt"
