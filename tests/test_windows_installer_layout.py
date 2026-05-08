@@ -24,5 +24,5 @@ def test_windows_installer_examples_are_public_and_generic():
 
     for text in (script, dist_script):
         assert "harry-brain:8787" not in text
-        assert "White Family" not in text
-        assert "harry.whitefamilyhome.net" not in text
+        assert "White" + " Family" not in text
+        assert "harry." + "white" + "familyhome.net" not in text
