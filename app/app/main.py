@@ -521,6 +521,7 @@ def _discovery_payload(request: Request) -> Dict[str, Any]:
     base_url, _ = _resolve_brain_urls(request)
     ingest_url = f"{base_url.rstrip('/')}/ingest"
     agent_download_url = f"{base_url.rstrip('/')}/downloads/windows-agent-exe"
+    agent_update_script_url = f"{base_url.rstrip('/')}/downloads/windows-update-script"
 
     return {
         "ok": True,
@@ -532,6 +533,7 @@ def _discovery_payload(request: Request) -> Dict[str, Any]:
         "base_url": base_url,
         "ingest_url": ingest_url,
         "agent_download_url": agent_download_url,
+        "agent_update_script_url": agent_update_script_url,
     }
 
 

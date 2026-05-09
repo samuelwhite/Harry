@@ -855,6 +855,26 @@ def download_windows_agent_exe() -> FileResponse:
     )
 
 
+@router.get("/downloads/windows-update-script")
+def download_windows_update_script() -> FileResponse:
+    candidates = [
+        Path(__file__).resolve().parents[2] / "dist" / "windows" / "update_agent.ps1",
+        Path(__file__).resolve().parents[3] / "agent" / "windows" / "update_agent.ps1",
+    ]
+    for path in candidates:
+        if path.exists() and path.is_file():
+            return FileResponse(
+                path=str(path),
+                filename="update_agent.ps1",
+                media_type="text/plain; charset=utf-8",
+            )
+
+    raise HTTPException(
+        status_code=404,
+        detail="Windows updater script not found. Expected dist/windows/update_agent.ps1.",
+    )
+
+
 @router.get("/downloads/linux-agent")
 def download_linux_agent() -> FileResponse:
     path = _downloads_dir() / "HarryAgentInstall.sh"

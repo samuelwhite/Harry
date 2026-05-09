@@ -66,6 +66,14 @@ def _update_script_path() -> Path:
     return _install_root() / UPDATE_SCRIPT_NAME
 
 
+def _brain_update_script_url(discovery: dict | None = None) -> str:
+    if discovery and isinstance(discovery, dict):
+        candidate = str(discovery.get("agent_update_script_url") or "").strip()
+        if candidate:
+            return candidate
+    return f"{BRAIN_URL.rstrip('/')}/downloads/windows-update-script"
+
+
 def _fetch_brain_discovery() -> dict | None:
     discover_url = f"{BRAIN_URL.rstrip('/')}/discover"
     req = urllib.request.Request(
@@ -95,11 +103,28 @@ def _fetch_brain_discovery() -> dict | None:
 def _launch_windows_updater(update_url: str) -> bool:
     script = _update_script_path()
     if not script.exists():
+        remote_script_url = _brain_update_script_url()
+        try:
+            data = urllib.request.urlopen(remote_script_url, timeout=5).read()
+            script.parent.mkdir(parents=True, exist_ok=True)
+            script.write_bytes(data)
+        except Exception as exc:
+            print(f"Windows updater script fetch failed: {exc}")
+
+    if not script.exists():
         print(f"Windows updater not found at {script}")
         return False
 
+    powershell_exe = (
+        Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        / "System32"
+        / "WindowsPowerShell"
+        / "v1.0"
+        / "powershell.exe"
+    )
+
     cmd = [
-        "powershell",
+        str(powershell_exe),
         "-NoProfile",
         "-ExecutionPolicy",
         "Bypass",

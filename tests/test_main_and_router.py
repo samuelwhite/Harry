@@ -152,6 +152,7 @@ def test_discover_endpoint_reports_brain_identity(monkeypatch, tmp_path):
     assert data["base_url"] == "http://brain.example:8789"
     assert data["ingest_url"] == "http://brain.example:8789/ingest"
     assert data["agent_download_url"] == "http://brain.example:8789/downloads/windows-agent-exe"
+    assert data["agent_update_script_url"] == "http://brain.example:8789/downloads/windows-update-script"
 
     assert well_known.status_code == 200
     assert well_known.json() == data
@@ -165,6 +166,16 @@ def test_downloads_exposes_windows_agent_binary(monkeypatch, tmp_path):
 
     assert resp.status_code == 200
     assert "harry_agent.exe" in resp.headers["content-disposition"]
+
+
+def test_downloads_exposes_windows_update_script(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+
+    with TestClient(main.app) as client:
+        resp = client.get("/downloads/windows-update-script")
+
+    assert resp.status_code == 200
+    assert "update_agent.ps1" in resp.headers["content-disposition"]
 
 
 def test_downloads_prefers_non_local_public_base_url(monkeypatch, tmp_path):
