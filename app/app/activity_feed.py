@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.db_helpers import STALE_SECONDS, _parse_ts, _safe_str
-from app.node_metadata import node_display_name
+from app.node_metadata import node_display_name, prime_privacy_aliases
 
 
 def _now_utc() -> datetime:
@@ -198,6 +198,14 @@ def prepare_activity_items(
     current_nodes: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     now = now or _now_utc()
+    prime_privacy_aliases(
+        [
+            _safe_str(e.get("node_id") or e.get("machine_id") or "").strip()
+            for e in events
+            if isinstance(e, dict)
+        ]
+        + list((current_nodes or {}).keys())
+    )
     ordered = sorted([e for e in events if isinstance(e, dict)], key=_event_sort_key, reverse=True)
     items: List[Dict[str, Any]] = []
     used: set[int] = set()

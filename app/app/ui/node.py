@@ -6,10 +6,11 @@ from typing import Any, Dict, List
 from fastapi import HTTPException
 
 from app.machine_summary import get_machine_summary
-from app.node_metadata import node_display_name, node_meta_summary
+from app.node_metadata import node_display_name, node_meta_summary, node_route_id, prime_privacy_aliases
+from app.node_metadata import privacy_mode_enabled
 from app.versions import AGENT_VERSION, BRAIN_VERSION
 
-from .db import get_latest_node_record, _load_schema_current, _raw_payload
+from .db import get_latest_node_record, get_latest_node_records, _load_schema_current, _raw_payload
 from .templates import _html_escape, render_shell
 
 
@@ -67,9 +68,11 @@ def _node_actions(node: str, hours: int) -> List[Dict[str, str]]:
 
 
 def render_node_detail(node: str, hours: int) -> str:
-    display_name = node_display_name(node.strip())
-    meta = node_meta_summary(node.strip())
-    row = get_latest_node_record(node.strip())
+    node = node.strip()
+    prime_privacy_aliases(list(get_latest_node_records().keys()))
+    display_name = node_display_name(node)
+    meta = node_meta_summary(node)
+    row = get_latest_node_record(node)
     if not row:
         raise HTTPException(status_code=404, detail="not_found")
 
@@ -81,8 +84,14 @@ def render_node_detail(node: str, hours: int) -> str:
     raw = _raw_payload(payload)
     summary = get_machine_summary(payload)
 
-    pretty_payload = _html_escape(json.dumps(payload, indent=2, ensure_ascii=False))
-    pretty_raw = _html_escape(json.dumps(raw, indent=2, ensure_ascii=False)) if raw else "—"
+    pretty_payload_text = json.dumps(payload, indent=2, ensure_ascii=False)
+    pretty_raw_text = json.dumps(raw, indent=2, ensure_ascii=False) if raw else ""
+    if privacy_mode_enabled():
+        pretty_payload_text = pretty_payload_text.replace(node, display_name)
+        pretty_raw_text = pretty_raw_text.replace(node, display_name)
+
+    pretty_payload = _html_escape(pretty_payload_text)
+    pretty_raw = _html_escape(pretty_raw_text) if raw else "—"
     summary_html = ""
     if summary and summary.get("summary"):
         summary_html = f"""
@@ -151,8 +160,8 @@ def render_node_detail(node: str, hours: int) -> str:
         active_page="node",
         page_title=display_name,
         page_subtitle=page_subtitle,
-        sidebar_sections=_node_sidebar(node=node, hours=hours),
-        actions=_node_actions(node=node, hours=hours),
+        sidebar_sections=_node_sidebar(node=node_route_id(node), hours=hours),
+        actions=_node_actions(node=node_route_id(node), hours=hours),
         content=content,
         sidebar_footer=sidebar_footer,
     )

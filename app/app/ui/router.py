@@ -35,6 +35,7 @@ from app.ui.diagnostics import render_diagnostics_page
 from app.ui.fleet import render_fleet_page
 from app.ui.inventory import _inventory_md, build_inventory_rows, render_inventory_page
 from app.ui.node import render_node_detail
+from app.node_metadata import resolve_node_reference
 from app.ui.templates import render_shell
 
 router = APIRouter()
@@ -981,27 +982,27 @@ def diagnostics(request: Request) -> HTMLResponse:
 @router.post("/node/{node}/hide")
 def node_hide(request: Request, node: str) -> RedirectResponse:
     next_url = (request.query_params.get("next") or "/").strip() or "/"
-    hide_node(node.strip())
+    hide_node(resolve_node_reference(node.strip()))
     return RedirectResponse(url=next_url, status_code=303)
 
 
 @router.post("/node/{node}/unhide")
 def node_unhide(request: Request, node: str) -> RedirectResponse:
     next_url = (request.query_params.get("next") or "/").strip() or "/"
-    unhide_node(node.strip())
+    unhide_node(resolve_node_reference(node.strip()))
     return RedirectResponse(url=next_url, status_code=303)
 
 
 @router.post("/node/{node}/delete")
 def node_delete(request: Request, node: str) -> RedirectResponse:
     next_url = (request.query_params.get("next") or "/").strip() or "/"
-    delete_node(node.strip())
+    delete_node(resolve_node_reference(node.strip()))
     return RedirectResponse(url=next_url, status_code=303)
 
 
 @router.get("/debug/latest/{node}")
 def debug_latest(node: str) -> JSONResponse:
-    node = node.strip()
+    node = resolve_node_reference(node.strip())
     with _db() as conn:
         cur = conn.execute("SELECT ts, node, payload FROM ingest WHERE node = ? ORDER BY ts DESC LIMIT 1", (node,))
         row = cur.fetchone()
@@ -1028,4 +1029,4 @@ def node_detail(request: Request, node: str) -> HTMLResponse:
         hours = DUMP_DEFAULT_HOURS
     hours = int(_clamp(hours, 1, 24 * 14))
 
-    return HTMLResponse(render_node_detail(node=node.strip(), hours=hours))
+    return HTMLResponse(render_node_detail(node=resolve_node_reference(node.strip()), hours=hours))

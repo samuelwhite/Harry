@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
-from app.node_metadata import node_display_name, node_meta_summary
+from app.node_metadata import node_display_name, node_meta_summary, node_route_id, prime_privacy_aliases
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
 from app.ui.capabilities import gpu_state_message
 
@@ -144,7 +144,8 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
         return out
 
     return {
-        "node": node,
+        "node": node_route_id(node),
+        "raw_node": node,
         "display_name": display_name,
         "meta": meta,
         "last_seen": ts,
@@ -165,6 +166,7 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
 
 
 def build_inventory_rows(latest: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    prime_privacy_aliases(list(latest.keys()))
     rows: List[Dict[str, Any]] = []
     for node, rec in latest.items():
         payload = rec.get("payload") if isinstance(rec.get("payload"), dict) else {}
@@ -291,6 +293,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
             rows = []
         else:
             latest = _fetch_latest_per_node(conn)
+            prime_privacy_aliases(list(latest.keys()))
             rows = build_inventory_rows(latest)
 
     node_count = len(rows)
@@ -319,7 +322,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
             f"""
 <tr>
   <td>
-    <a href="/node/{node}?hours={hours}">{_html_escape(display_name)}</a>
+    <a href="/node/{_html_escape(node_route_id(node))}?hours={hours}">{_html_escape(display_name)}</a>
     {f'<div class="muted" style="font-size:12px;">{_html_escape(meta)}</div>' if meta else ''}
   </td>
   <td>{model}</td>
@@ -337,7 +340,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
 <div class="card">
   <div class="sectionhead">
     <div>
-      <div class="h2"><a href="/node/{node}?hours={hours}">{_html_escape(display_name)}</a></div>
+      <div class="h2"><a href="/node/{_html_escape(node_route_id(node))}?hours={hours}">{_html_escape(display_name)}</a></div>
       <div class="h2sub">{model}</div>
       {f'<div class="muted" style="font-size:12px; margin-top:4px;">{_html_escape(meta)}</div>' if meta else ''}
     </div>

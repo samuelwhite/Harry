@@ -13,7 +13,7 @@ from app.health import compute_health
 from app.rules import evaluate as rules_evaluate
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
 from app.service_awareness import build_service_rows, has_explicit_service_configuration
-from app.node_metadata import node_display_name, node_meta_summary
+from app.node_metadata import node_display_name, node_meta_summary, node_route_id, prime_privacy_aliases
 from app.db_helpers import _db_path
 from app.ui.db import (
     STALE_SECONDS,
@@ -1027,7 +1027,7 @@ def _agent_version_state(actual: str, expected: str) -> str:
 
 
 def _node_action_url(node: str, action: str, next_url: str) -> str:
-    return f"/node/{quote(node, safe='')}/{action}?next={quote(next_url, safe='')}"
+    return f"/node/{quote(node_route_id(node), safe='')}/{action}?next={quote(next_url, safe='')}"
 
 
 def _action_form(url: str, label: str, confirm_text: Optional[str] = None) -> str:
@@ -1211,7 +1211,7 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
 
     return NodeView(
         node=node,
-        node_id=_safe_dom_id(node),
+        node_id=_safe_dom_id(node_route_id(node)),
         model=model,
         cpu=cpu,
         bios=bios,
@@ -1578,7 +1578,7 @@ def _render_fleet_map(nodeviews: List[NodeView], brain_name: str) -> str:
             agent_fill = "rgba(255,255,255,0.45)"
 
         svg.append(
-            f'<a xlink:href="/node/{_html_escape(nv.node)}" href="/node/{_html_escape(nv.node)}">'
+            f'<a xlink:href="/node/{_html_escape(node_route_id(nv.node))}" href="/node/{_html_escape(node_route_id(nv.node))}">'
             f'<text x="{nx}" y="{y+2}" fill="rgba(255,255,255,0.92)" font-size="14" font-weight="800">'
             f"{_html_escape(label)}</text></a>"
         )
@@ -1647,7 +1647,7 @@ def _render_inventory_table(nodeviews: List[NodeView], hours: int) -> str:
         rows.append(
             f"""
 <tr>
-  <td class="status"><span class="{dot}"></span> <a href="/node/{_html_escape(nv.node)}">{_html_escape(display_name)}</a></td>
+  <td class="status"><span class="{dot}"></span> <a href="/node/{_html_escape(node_route_id(nv.node))}">{_html_escape(display_name)}</a></td>
   <td>{_html_escape(model)}</td>
   <td>{_html_escape(cpu)}</td>
   <td class="right mono">
@@ -1716,7 +1716,7 @@ def _render_advice_queue(nodeviews: List[NodeView]) -> str:
             f"""
 <div class="advrow">
   <div class="advleft">
-    <div class="advnode"><a href="/node/{_html_escape(node)}">{_html_escape(display_name)}</a> <span class="advsmall">{_html_escape(model)}</span></div>
+    <div class="advnode"><a href="/node/{_html_escape(node_route_id(node))}">{_html_escape(display_name)}</a> <span class="advsmall">{_html_escape(model)}</span></div>
     <div class="advmsg">{_html_escape(msg)}</div>
   </div>
   <div class="advright">
@@ -1822,7 +1822,7 @@ def _render_fleet_trends(nodeviews: List[NodeView], hours: int) -> str:
 <div class="card trendcard">
   <div class="sectionhead">
     <div>
-      <div class="h2"><a href="/node/{_html_escape(nv.node)}?hours={hours}">{_html_escape(display_name)}</a></div>
+      <div class="h2"><a href="/node/{_html_escape(node_route_id(nv.node))}?hours={hours}">{_html_escape(display_name)}</a></div>
       <div class="h2sub">{_html_escape(nv.model or nv.cpu or 'Hardware trends')}</div>
     </div>
     <div class="actions trendpills">
@@ -2018,7 +2018,7 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
     <div class="left">
       <div class="title">
         <span class="{dot}"></span>
-        <a class="nodename" href="/node/{_html_escape(nv.node)}?hours={hours}">{_html_escape(display_name)}</a>
+        <a class="nodename" href="/node/{_html_escape(node_route_id(nv.node))}?hours={hours}">{_html_escape(display_name)}</a>
         <span class="model">{_html_escape(model)}</span>
       </div>
       <div class="nodever {agent_state}">
@@ -2102,6 +2102,7 @@ def build_nodeviews(hours: int = 72) -> List[NodeView]:
             return []
 
         latest = _fetch_latest_per_node(conn)
+        prime_privacy_aliases(list(latest.keys()))
         nodeviews: List[NodeView] = []
         for node, rec in latest.items():
             nodeviews.append(build_node_view(conn, node, rec, hours=hours))
@@ -2132,6 +2133,7 @@ def build_hidden_nodeviews(hours: int = 72) -> List[NodeView]:
             return []
 
         latest = _fetch_latest_hidden_per_node(conn)
+        prime_privacy_aliases(list(latest.keys()))
         nodeviews: List[NodeView] = []
         for node, rec in latest.items():
             nodeviews.append(build_node_view(conn, node, rec, hours=hours))

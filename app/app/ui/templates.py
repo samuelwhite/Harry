@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 from app.activity_feed import format_relative_ago
+from app.node_metadata import privacy_mode_enabled
 
 CSS = """
 :root {
@@ -1724,6 +1725,7 @@ def render_shell(
             </div>
           </div>
           <div class="topbar-right">
+            {'<div class="versionchip">Privacy Mode Enabled</div>' if privacy_mode_enabled() else ''}
             {f'<div class="versionchip">{sidebar_footer}</div>' if sidebar_footer else ''}
             {_render_actions(actions)}
           </div>
