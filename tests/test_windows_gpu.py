@@ -53,6 +53,9 @@ def test_windows_get_gpus_returns_single_gpu(monkeypatch):
     assert gpu["video_processor"] == "NVIDIA GeForce RTX 4080"
     assert gpu["status"] == "OK"
     assert gpu["pnp_device_id"] == "PCI\\VEN_10DE&DEV_2704"
+    assert gpu["vendor"] == "NVIDIA"
+    assert gpu["cuda_capable"] is True
+    assert gpu["capability_hint"] == "CUDA capable"
 
 
 def test_windows_get_gpus_keeps_multiple_same_name_devices(monkeypatch):
@@ -106,6 +109,9 @@ def test_windows_get_gpus_handles_partial_payload(monkeypatch):
     assert gpus[0]["name"] == "Intel UHD Graphics"
     assert gpus[0]["mem_total_mb"] is None
     assert gpus[0]["driver"] is None
+    assert gpus[0]["vendor"] == "Intel"
+    assert gpus[0]["integrated"] is True
+    assert gpus[0]["capability_hint"] == "Integrated graphics"
 
 
 def test_normalise_for_schema_promotes_windows_fact_gpu_payload():
@@ -123,6 +129,9 @@ def test_normalise_for_schema_promotes_windows_fact_gpu_payload():
                     "pnp_device_id": "PCI\\VEN_10DE&DEV_2704",
                     "video_processor": "NVIDIA GeForce RTX 4080",
                     "status": "OK",
+                    "vendor": "NVIDIA",
+                    "cuda_capable": True,
+                    "capability_hint": "CUDA capable",
                 }
             ]
         },
@@ -142,3 +151,6 @@ def test_normalise_for_schema_promotes_windows_fact_gpu_payload():
     assert gpu["bus_id"] == "PCI\\VEN_10DE&DEV_2704"
     assert gpu["video_processor"] == "NVIDIA GeForce RTX 4080"
     assert gpu["status"] == "OK"
+    assert gpu["vendor"] == "NVIDIA"
+    assert gpu["cuda_capable"] is True
+    assert gpu["capability_hint"] == "CUDA capable"

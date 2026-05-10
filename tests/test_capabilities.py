@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.harry_normalise import normalise_for_schema
-from app.ui.capabilities import gpu_state_message
+from app.ui.capabilities import gpu_state_message, gpu_capability_hint
 
 
 def test_normalise_for_schema_defaults_missing_capabilities_to_empty_dict():
@@ -78,3 +78,9 @@ def test_gpu_state_message_covers_all_user_facing_states():
     assert gpu_state_message({"gpu": True}, []) == "No GPU detected"
     assert gpu_state_message({}, []) == "GPU data unavailable"
     assert gpu_state_message({"gpu": False}, [{"name": "GPU0"}]) == ""
+
+
+def test_gpu_capability_hint_infers_common_hardware_families():
+    assert gpu_capability_hint({"name": "NVIDIA GeForce RTX 3080"}) == "CUDA capable"
+    assert gpu_capability_hint({"name": "Intel Iris Xe", "integrated": True}) == "Integrated graphics"
+    assert gpu_capability_hint({"name": "AMD Radeon RX 7800 XT"}) == "Dedicated graphics"

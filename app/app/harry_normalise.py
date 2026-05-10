@@ -131,7 +131,21 @@ def normalise_harry_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
                 if mt and mt > 0 and mu is not None:
                     mem_used_pct = _clamp((mu / mt) * 100.0)
 
-            gpus_norm.append({"name": name, "temp_c": temp_c, "util_pct": util_pct, "mem_used_pct": mem_used_pct})
+            gpus_norm.append(
+                {
+                    "name": name,
+                    "temp_c": temp_c,
+                    "util_pct": util_pct,
+                    "mem_used_pct": mem_used_pct,
+                    "vendor": g.get("vendor"),
+                    "integrated": g.get("integrated"),
+                    "dedicated": g.get("dedicated"),
+                    "cuda_capable": g.get("cuda_capable"),
+                    "directml_capable": g.get("directml_capable"),
+                    "capability_hint": g.get("capability_hint"),
+                    "vram_mb": _num(g.get("vram_mb")) or _num(g.get("mem_total_mb")),
+                }
+            )
 
         useds = [x["mem_used_pct"] for x in gpus_norm if x.get("mem_used_pct") is not None]
         temps = [x["temp_c"] for x in gpus_norm if x.get("temp_c") is not None]
@@ -338,6 +352,16 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
                 item["status"] = str(g.get("status"))
             if g.get("integrated") is not None:
                 item["integrated"] = bool(g.get("integrated"))
+            if g.get("dedicated") is not None:
+                item["dedicated"] = bool(g.get("dedicated"))
+            if g.get("cuda_capable") is not None:
+                item["cuda_capable"] = bool(g.get("cuda_capable"))
+            if g.get("directml_capable") is not None:
+                item["directml_capable"] = bool(g.get("directml_capable"))
+            if g.get("vendor") is not None:
+                item["vendor"] = str(g.get("vendor"))
+            if g.get("capability_hint") is not None:
+                item["capability_hint"] = str(g.get("capability_hint"))
             if g.get("pnp_device_id") is not None:
                 item["pnp_device_id"] = str(g.get("pnp_device_id"))
 

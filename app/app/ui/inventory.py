@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Tuple
 
 from app.node_metadata import node_display_name, node_meta_summary, node_route_id, prime_privacy_aliases
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
-from app.ui.capabilities import gpu_state_message
+from app.ui.capabilities import gpu_state_message, gpu_capability_hint
 
 from .db import (
     _db,
@@ -102,6 +102,34 @@ def _get_gpu_list(metrics: Dict[str, Any], raw: Dict[str, Any]) -> List[Dict[str
     return []
 
 
+def _get_network_interfaces(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    raw = _raw_payload(payload)
+    facts = _get_facts(payload)
+    metrics = _get_metrics(payload)
+
+    sources = [
+        facts.get("network_interfaces"),
+        facts.get("interfaces"),
+        facts.get("nics"),
+        metrics.get("network_interfaces"),
+        metrics.get("interfaces"),
+        metrics.get("nics"),
+        raw.get("network_interfaces"),
+        raw.get("interfaces"),
+        raw.get("nics"),
+    ]
+
+    out: List[Dict[str, Any]] = []
+    for source in sources:
+        if not isinstance(source, list):
+            continue
+        for item in source:
+            if isinstance(item, dict):
+                out.append(item)
+
+    return out
+
+
 def _facts_pick(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     raw = _raw_payload(payload)
     facts = _get_facts(payload)
@@ -132,6 +160,7 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
     metrics = _get_metrics(payload)
     if not gpus:
         gpus = _get_gpu_list(metrics, _raw_payload(payload))
+    nics = _get_network_interfaces(payload)
     display_name = node_display_name(node)
     meta = node_meta_summary(node)
 
@@ -161,6 +190,7 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
         "ram_type": ram_type,
         "disks": clean_list(disks, ["name", "type", "size_gb", "model", "serial"]),
         "gpus": clean_list(gpus, ["name", "driver", "bus_id", "mem_total_mb"]),
+        "network_interfaces": clean_list(nics, ["name", "mac", "ip", "ipv4", "ipv6", "speed_mbps", "vendor"]),
         "capabilities": capabilities,
     }
 
@@ -223,7 +253,20 @@ def _inventory_md(rows: List[Dict[str, Any]]) -> str:
                 name = g.get("name") or "gpu"
                 mem = g.get("mem_total_mb")
                 mem_txt = f"{mem}MB" if mem is not None else "—"
-                lines.append(f"  - `{name}` · `{mem_txt}`")
+                hint = gpu_capability_hint(g)
+                hint_txt = f" · `{hint}`" if hint else ""
+                lines.append(f"  - `{name}` · `{mem_txt}`{hint_txt}")
+
+        nics = r.get("network_interfaces") or []
+        if nics:
+            lines.append("- Network interfaces:")
+            for nic in nics:
+                name = nic.get("name") or nic.get("vendor") or "interface"
+                ip = nic.get("ip") or nic.get("ipv4") or nic.get("ipv6") or "—"
+                mac = nic.get("mac") or "—"
+                speed = nic.get("speed_mbps")
+                speed_txt = f"{speed}Mbps" if speed is not None else "—"
+                lines.append(f"  - `{name}` · `{ip}` · `{mac}` · `{speed_txt}`")
 
         lines.append("")
 
@@ -255,16 +298,12 @@ def _fmt_disk_brief(disks: List[Dict[str, Any]]) -> str:
         return "—"
 
     bits: List[str] = []
-    for d in disks[:3]:
+    for d in disks:
         name = d.get("name") or d.get("model") or "disk"
         dtype = d.get("type") or "—"
         size = d.get("size_gb")
         size_txt = f"{size}GB" if size is not None else "—"
         bits.append(f"{name} · {dtype} · {size_txt}")
-
-    extra = len(disks) - 3
-    if extra > 0:
-        bits.append(f"+{extra} more")
 
     return "<br>".join(bits)
 
@@ -274,15 +313,28 @@ def _fmt_gpu_brief(gpus: List[Dict[str, Any]], capabilities: Dict[str, Any]) -> 
         return gpu_state_message(capabilities, gpus)
 
     bits: List[str] = []
-    for g in gpus[:2]:
+    for g in gpus:
         name = g.get("name") or "gpu"
         mem = g.get("mem_total_mb")
         mem_txt = f"{mem}MB" if mem is not None else "—"
-        bits.append(f"{name} · {mem_txt}")
+        hint = gpu_capability_hint(g)
+        bits.append(f"{name} · {mem_txt}" + (f" · {hint}" if hint else ""))
 
-    extra = len(gpus) - 2
-    if extra > 0:
-        bits.append(f"+{extra} more")
+    return "<br>".join(bits)
+
+
+def _fmt_nic_brief(nics: List[Dict[str, Any]]) -> str:
+    if not nics:
+        return "—"
+
+    bits: List[str] = []
+    for nic in nics:
+        name = nic.get("name") or nic.get("vendor") or "interface"
+        ip = nic.get("ip") or nic.get("ipv4") or nic.get("ipv6") or "—"
+        mac = nic.get("mac") or "—"
+        speed = nic.get("speed_mbps")
+        speed_txt = f"{speed}Mbps" if speed is not None else "—"
+        bits.append(f"{name} · {ip} · {mac} · {speed_txt}")
 
     return "<br>".join(bits)
 
@@ -316,6 +368,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
         agent = display_agent_version(r.get("agent_version") or "unknown")
         disks = r.get("disks") or []
         gpus = r.get("gpus") or []
+        nics = r.get("network_interfaces") or []
         capabilities = r.get("capabilities") or {}
 
         table_rows.append(
@@ -364,6 +417,13 @@ def render_inventory_page(hours: int, debug: bool) -> str:
     <div class="subcard">
       <div class="subcardtitle">Graphics</div>
       <div class="subcardbody">{_fmt_gpu_brief(gpus, capabilities)}</div>
+    </div>
+  </div>
+
+  <div class="splitcols">
+    <div class="subcard" style="grid-column: 1 / -1;">
+      <div class="subcardtitle">Network interfaces</div>
+      <div class="subcardbody">{_fmt_nic_brief(nics)}</div>
     </div>
   </div>
 </div>

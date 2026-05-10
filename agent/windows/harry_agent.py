@@ -446,8 +446,18 @@ $items | ConvertTo-Json -Compress
 def get_gpus() -> list[dict]:
     ps = r"""
 $items = Get-CimInstance Win32_VideoController |
-  Select-Object Name, AdapterRAM, DriverVersion, VideoProcessor, PNPDeviceID, Status |
-  Where-Object { $_.Name -and $_.Name.Trim() -ne "" }
+  Select-Object Name, Caption, Description, AdapterRAM, DriverVersion, VideoProcessor, PNPDeviceID, Status, AdapterCompatibility, InstalledDisplayDrivers |
+  Where-Object {
+    ($_.Name -and $_.Name.Trim() -ne "") -or
+    ($_.Caption -and $_.Caption.Trim() -ne "") -or
+    ($_.Description -and $_.Description.Trim() -ne "")
+  }
+
+if (-not $items) {
+  $items = Get-CimInstance Win32_PnPEntity |
+    Where-Object { $_.PNPClass -eq "Display" } |
+    Select-Object Name, Caption, Description, PNPDeviceID, Status, AdapterCompatibility
+}
 
 $items | ConvertTo-Json -Compress
 """
@@ -462,7 +472,7 @@ $items | ConvertTo-Json -Compress
     seen = set()
 
     for g in data:
-        name = (g.get("Name") or "").strip()
+        name = (g.get("Name") or g.get("Caption") or g.get("Description") or g.get("VideoProcessor") or "").strip()
         if not name:
             continue
 
@@ -481,18 +491,45 @@ $items | ConvertTo-Json -Compress
         except Exception:
             pass
 
+        vendor = (g.get("AdapterCompatibility") or "").strip() or None
+        if not vendor:
+            lowered = name.lower()
+            if "nvidia" in lowered or "geforce" in lowered or "quadro" in lowered or "rtx" in lowered or "gtx" in lowered:
+                vendor = "NVIDIA"
+            elif "intel" in lowered or "iris" in lowered or "uhd graphics" in lowered:
+                vendor = "Intel"
+            elif "amd" in lowered or "radeon" in lowered:
+                vendor = "AMD"
+
         pnp_upper = pnp.upper()
         integrated = False
 
         lower_name = name.lower()
         if "vega" in lower_name or "radeon(tm)" in lower_name:
             integrated = True
+        if "intel" in lower_name or "uhd graphics" in lower_name or "iris xe" in lower_name:
+            integrated = True
         if "PCI\\VEN_" in pnp_upper:
             integrated = False if "NVIDIA" in name.upper() or "GEFORCE" in name.upper() else integrated
+
+        cuda_capable = bool(vendor and vendor.upper() == "NVIDIA")
+        directml_capable = bool(vendor and vendor.upper() in {"NVIDIA", "AMD", "INTEL"})
+        dedicated = not integrated and vendor is not None
+
+        capability_hint = None
+        if cuda_capable:
+            capability_hint = "CUDA capable"
+        elif integrated:
+            capability_hint = "Integrated graphics"
+        elif dedicated:
+            capability_hint = "Dedicated graphics"
+        elif directml_capable:
+            capability_hint = "DirectML capable"
 
         gpus.append(
             {
                 "name": name,
+                "vendor": vendor,
                 "vram_mb": vram_mb,
                 "mem_total_mb": vram_mb,
                 "driver": g.get("DriverVersion"),
@@ -501,6 +538,10 @@ $items | ConvertTo-Json -Compress
                 "status": g.get("Status"),
                 "pnp_device_id": g.get("PNPDeviceID"),
                 "integrated": integrated,
+                "dedicated": dedicated,
+                "cuda_capable": cuda_capable,
+                "directml_capable": directml_capable,
+                "capability_hint": capability_hint,
             }
         )
 
