@@ -50,6 +50,35 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-PythonJson {
+    param([string]$Command)
+
+    $oldPythonPath = $env:PYTHONPATH
+    $appPath = Join-Path $Root "app"
+    if ([string]::IsNullOrWhiteSpace($oldPythonPath)) {
+        $env:PYTHONPATH = $appPath
+    } else {
+        $env:PYTHONPATH = $appPath + [IO.Path]::PathSeparator + $oldPythonPath
+    }
+
+    try {
+        $result = & python -c $Command 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $message = ($result | Out-String).Trim()
+            throw "Failed to import app.versions or app.ui.db while gathering Windows installer metadata.`n$message"
+        }
+
+        $json = ($result | Out-String).Trim()
+        if ([string]::IsNullOrWhiteSpace($json)) {
+            throw "Windows installer metadata command returned no output."
+        }
+
+        return $json
+    } finally {
+        $env:PYTHONPATH = $oldPythonPath
+    }
+}
+
 $Root = (Resolve-Path $Root).Path
 $InstallerScript = Join-Path $Root "installers/windows/iss/HarryAgent.iss"
 $SyncScript = Join-Path $Root "scripts/sync_windows_artifacts.py"
@@ -72,8 +101,12 @@ if (-not (Test-Path $InstallerExe)) {
 
 Copy-Item $InstallerExe (Join-Path $DownloadDir "HarryAgentSetup.exe") -Force
 
-$versionsJson = & python -c "import json; from app.versions import BRAIN_VERSION, AGENT_VERSION; from app.ui.db import _load_schema_current; print(json.dumps({'brain_version': BRAIN_VERSION, 'agent_version': AGENT_VERSION, 'schema_current': _load_schema_current()}))"
+$versionsJson = Invoke-PythonJson "import json; from app.versions import BRAIN_VERSION, AGENT_VERSION; from app.ui.db import _load_schema_current; print(json.dumps({'brain_version': BRAIN_VERSION, 'agent_version': AGENT_VERSION, 'schema_current': _load_schema_current()}))"
 $versions = $versionsJson | ConvertFrom-Json
+
+if (-not $versions -or [string]::IsNullOrWhiteSpace([string]$versions.brain_version) -or [string]::IsNullOrWhiteSpace([string]$versions.agent_version) -or [string]::IsNullOrWhiteSpace([string]$versions.schema_current)) {
+    throw "Windows installer version metadata was empty or invalid."
+}
 
 $manifest = [ordered]@{
     installer_name = "HarryAgentSetup.exe"
@@ -89,4 +122,6 @@ $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $InstallerManifest -Enco
 
 Write-Host "Installer artifact: $(Join-Path $DownloadDir 'HarryAgentSetup.exe')"
 Write-Host "Manifest: $InstallerManifest"
-Write-Host "Version: Brain $($versions.brain_version) / Agent $($versions.agent_version) / Schema $($versions.schema_current)"
+Write-Host "Brain version: $($versions.brain_version)"
+Write-Host "Agent version: $($versions.agent_version)"
+Write-Host "Schema version: $($versions.schema_current)"

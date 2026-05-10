@@ -7,13 +7,38 @@ from app.versions import BRAIN_VERSION
 
 def test_windows_installer_release_script_describes_current_pipeline():
     script = Path("scripts/build-windows-installer.ps1").read_text(encoding="utf-8")
+    deploy = Path("scripts/deploy-windows-installer.ps1").read_text(encoding="utf-8")
+    release = Path("scripts/release-windows-installer.ps1").read_text(encoding="utf-8")
 
     assert "sync_windows_artifacts.py" in script
     assert "ISCC.exe" in script
     assert "HarryAgent.iss" in script
     assert "HarryAgentSetup.exe" in script
     assert "HarryAgentSetup.manifest.json" in script
+    assert "PYTHONPATH" in script
+    assert "Failed to import app.versions or app.ui.db" in script
+    assert "Windows installer version metadata was empty or invalid" in script
+    assert "Installer artifact:" in script
+    assert "Manifest:" in script
     assert "downloads" in script
+    assert "Brain version:" in script
+    assert "Agent version:" in script
+    assert "Schema version:" in script
+
+    assert "TargetHost" in deploy
+    assert "TargetPath" in deploy
+    assert "TargetUser" in deploy
+    assert "scp" in deploy
+    assert "Windows installer EXE not found" in deploy
+    assert "Windows installer manifest not found" in deploy
+    assert "manifest versions do not match" in deploy
+    assert "Copying Windows installer artifacts" in deploy
+
+    assert "Build complete." in release
+    assert "Next steps:" in release
+    assert "TargetHost" in release
+    assert "TargetUser" in release
+    assert "Deploying Windows installer artifacts" in release
     assert "brain_version" in script
     assert "agent_version" in script
     assert "schema_current" in script

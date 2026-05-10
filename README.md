@@ -63,6 +63,26 @@ To verify the installer path:
 
 The installer should reflect Brain `2026.05.09`, Agent `0.2.5`, and Schema `0.2.3`.
 
+For a one-command build-and-deploy flow:
+
+`pwsh -File scripts/release-windows-installer.ps1 -TargetHost <brain-host> -TargetUser <ssh-user>`
+
+For manual copy:
+
+`scp downloads\HarryAgentSetup.exe <ssh-user>@<brain-host>:/opt/harry/downloads/`
+`scp downloads\HarryAgentSetup.manifest.json <ssh-user>@<brain-host>:/opt/harry/downloads/`
+
+On the Brain, verify the artifact and served download:
+
+`cat /opt/harry/downloads/HarryAgentSetup.manifest.json`
+`curl -o /tmp/HarryAgentSetup.exe http://127.0.0.1:8789/downloads/windows-agent`
+
+Notes:
+
+`HarryAgentSetup.exe` is generated, not committed.
+The manifest prevents stale installers from being served silently.
+The build step requires Inno Setup 6 and `ISCC.exe` on PATH or installed in the default location.
+
 ---
 
 ## 🐧 Linux Brain (Most Stable)
