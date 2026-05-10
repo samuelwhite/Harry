@@ -520,7 +520,7 @@ def _discovery_payload(request: Request) -> Dict[str, Any]:
     info = resolve_brain_address(request)
     base_url = str(info.get("display_url") or "").strip() or None
     ingest_url = f"{base_url.rstrip('/')}/ingest" if base_url else None
-    agent_download_url = f"{base_url.rstrip('/')}/downloads/windows-agent-script" if base_url else None
+    agent_download_url = f"{base_url.rstrip('/')}/downloads/windows-agent-exe" if base_url else None
     agent_update_script_url = f"{base_url.rstrip('/')}/downloads/windows-update-script" if base_url else None
 
     return {
