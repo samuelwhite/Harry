@@ -38,6 +38,7 @@ from app.ui.fleet import render_fleet_page
 from app.ui.inventory import _inventory_md, build_inventory_rows, render_inventory_page
 from app.ui.node import render_node_detail
 from app.node_metadata import resolve_node_reference
+from app.versions import AGENT_VERSION, BRAIN_VERSION
 from app.ui.templates import render_shell
 
 router = APIRouter()
@@ -561,6 +562,47 @@ def _downloads_advanced_help_html() -> str:
 """
 
 
+def _load_current_schema_version() -> str:
+    schema_file = Path(__file__).resolve().parents[2] / "schemas" / "harry" / "current.json"
+    try:
+        if not schema_file.exists() or not schema_file.is_file():
+            return "unknown"
+        data = json.loads(schema_file.read_text(encoding="utf-8"))
+        return str(data.get("schema_version") or data.get("contract_version") or "unknown")
+    except Exception:
+        return "unknown"
+
+
+def _windows_installer_manifest_path() -> Path:
+    return _downloads_dir() / "HarryAgentSetup.manifest.json"
+
+
+def _load_windows_installer_manifest() -> dict[str, object] | None:
+    path = _windows_installer_manifest_path()
+    if not path.exists() or not path.is_file():
+        return None
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    return data if isinstance(data, dict) else None
+
+
+def _windows_installer_is_current(manifest: dict[str, object] | None) -> bool:
+    if not manifest:
+        return False
+
+    schema_current = _load_current_schema_version()
+    return (
+        str(manifest.get("installer_name") or "") == "HarryAgentSetup.exe"
+        and str(manifest.get("brain_version") or "") == BRAIN_VERSION
+        and str(manifest.get("agent_version") or "") == AGENT_VERSION
+        and str(manifest.get("schema_current") or "") == schema_current
+    )
+
+
 @router.get("/ui/health")
 def ui_health() -> PlainTextResponse:
     return PlainTextResponse("ok\n")
@@ -581,6 +623,8 @@ def downloads_page(request: Request) -> HTMLResponse:
             if not path.is_file():
                 continue
             if path.name.startswith("."):
+                continue
+            if path.name.endswith(".manifest.json"):
                 continue
             if "Agent" not in path.name:
                 continue
@@ -644,6 +688,19 @@ def downloads_page(request: Request) -> HTMLResponse:
 
     warning_html = _downloads_fallback_help_html() if (warning or needs_guidance) else ""
     advanced_html = _downloads_advanced_help_html()
+    windows_installer_html = """
+<section class="section" id="downloads-windows-installer">
+  <div class="card">
+    <div class="k">Windows installer</div>
+    <div class="v big"><code>HarryAgentSetup.exe</code></div>
+    <div class="subtitle">Current setup EXE built from the latest source. It installs Harry Agent and sets up discovery automatically.</div>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px;">
+      <a class="btn" href="/downloads/windows-agent">Download Windows installer</a>
+      <code>HarryAgentSetup.exe</code>
+    </div>
+  </div>
+</section>
+"""
 
     content = f"""
     {warning_html}
@@ -662,6 +719,8 @@ def downloads_page(request: Request) -> HTMLResponse:
     {"<div class=\"subtitle\" style=\"margin-top:8px; color:rgba(251,191,36,0.95);\">"+html.escape(warning_note)+"</div>" if warning_note else ""}
   </div>
 </section>
+
+{windows_installer_html}
 
 <section class="section" id="downloads-files">
   <div class="sectionhead">
@@ -771,10 +830,18 @@ def fleet_partial(request: Request) -> HTMLResponse:
 @router.get("/downloads/windows-agent")
 def download_windows_agent() -> FileResponse:
     path = _downloads_dir() / "HarryAgentSetup.exe"
+    manifest = _load_windows_installer_manifest()
+
     if not path.exists() or not path.is_file():
         raise HTTPException(
             status_code=404,
             detail="Windows agent installer not found. Expected downloads/HarryAgentSetup.exe.",
+        )
+
+    if not _windows_installer_is_current(manifest):
+        raise HTTPException(
+            status_code=503,
+            detail="Windows agent installer is stale or missing its manifest. Rebuild it with scripts/build-windows-installer.ps1.",
         )
 
     return FileResponse(

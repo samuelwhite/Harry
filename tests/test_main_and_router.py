@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -155,6 +156,7 @@ def test_discover_endpoint_reports_brain_identity(monkeypatch, tmp_path):
     assert data["address_source"] == "canonical"
     assert data["base_url"] == "http://brain.example:8789"
     assert data["ingest_url"] == "http://brain.example:8789/ingest"
+    assert data["installer_download_url"] == "http://brain.example:8789/downloads/windows-agent"
     assert data["agent_download_url"] == "http://brain.example:8789/downloads/windows-agent-exe"
     assert data["agent_update_script_url"] == "http://brain.example:8789/downloads/windows-update-script"
 
@@ -170,6 +172,52 @@ def test_downloads_exposes_windows_agent_binary(monkeypatch, tmp_path):
 
     assert resp.status_code == 200
     assert "harry_agent.exe" in resp.headers["content-disposition"]
+
+
+def test_downloads_exposes_windows_agent_setup(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("HARRY_DOWNLOADS_DIR", str(tmp_path))
+    (tmp_path / "HarryAgentSetup.exe").write_bytes(b"MZ")
+    (tmp_path / "HarryAgentSetup.manifest.json").write_text(
+        json.dumps(
+            {
+                "installer_name": "HarryAgentSetup.exe",
+                "brain_version": "2026.05.09",
+                "agent_version": "0.2.5",
+                "schema_current": "0.2.3",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with TestClient(main.app) as client:
+        resp = client.get("/downloads/windows-agent")
+
+    assert resp.status_code == 200
+    assert "HarryAgentSetup.exe" in resp.headers["content-disposition"]
+
+
+def test_downloads_rejects_stale_windows_agent_setup(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("HARRY_DOWNLOADS_DIR", str(tmp_path))
+    (tmp_path / "HarryAgentSetup.exe").write_bytes(b"MZ")
+    (tmp_path / "HarryAgentSetup.manifest.json").write_text(
+        json.dumps(
+            {
+                "installer_name": "HarryAgentSetup.exe",
+                "brain_version": "2026.03.18",
+                "agent_version": "0.2.3",
+                "schema_current": "0.2.3",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with TestClient(main.app) as client:
+        resp = client.get("/downloads/windows-agent")
+
+    assert resp.status_code == 503
+    assert "stale" in resp.text.lower()
 
 
 def test_downloads_exposes_windows_agent_script(monkeypatch, tmp_path):
@@ -261,6 +309,8 @@ def test_downloads_removes_local_only_block(monkeypatch, tmp_path):
     html = _render_downloads(monkeypatch, tmp_path)
 
     assert "Recommended Windows installer" not in html
+    assert "Windows installer" in html
+    assert "HarryAgentSetup.exe" in html
     assert "Other machines should use this address." in html
     assert "Advanced configuration" in html
     assert "windows-agent-script" not in html
@@ -397,6 +447,6 @@ def test_api_page_lists_core_endpoints_and_examples():
     assert "/ingest" in html
     assert "/inventory.json" in html
     assert "curl http://&lt;brain-ip&gt;:8789/health" in html
-    assert "Invoke-WebRequest http://&lt;brain-ip&gt;:8789/downloads/windows-agent-exe" in html
+    assert "Invoke-WebRequest http://&lt;brain-ip&gt;:8789/downloads/windows-agent" in html
     assert "import requests" in html
     assert "Privacy Mode Enabled" not in html

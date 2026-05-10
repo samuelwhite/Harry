@@ -1,5 +1,5 @@
 #define MyAppName "Harry Agent"
-#define MyAppVersion "2026.05.10"
+#define MyAppVersion "2026.05.09"
 #define MyAppPublisher "Harry Contributors"
 
 [Setup]

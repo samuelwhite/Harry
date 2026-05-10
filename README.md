@@ -46,6 +46,23 @@ Your machine will automatically register as the first node.
 
 If you need the discovery-aware agent installer directly from the Downloads page, use the PowerShell installer script and let it find Harry Brain automatically.
 
+If you want to rebuild the Windows installer EXE itself, run:
+
+`pwsh -File scripts/build-windows-installer.ps1`
+
+That script expects Inno Setup 6 (`ISCC.exe`) to be available.
+
+That refreshes the packaged Windows artifacts and writes:
+
+`downloads/HarryAgentSetup.exe`
+`downloads/HarryAgentSetup.manifest.json`
+
+To verify the installer path:
+
+`downloads/HarryAgentSetup.exe`
+
+The installer should reflect Brain `2026.05.09`, Agent `0.2.5`, and Schema `0.2.3`.
+
 ---
 
 ## 🐧 Linux Brain (Most Stable)
