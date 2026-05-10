@@ -155,7 +155,7 @@ def test_discover_endpoint_reports_brain_identity(monkeypatch, tmp_path):
     assert data["address_source"] == "canonical"
     assert data["base_url"] == "http://brain.example:8789"
     assert data["ingest_url"] == "http://brain.example:8789/ingest"
-    assert data["agent_download_url"] == "http://brain.example:8789/downloads/windows-agent-exe"
+    assert data["agent_download_url"] == "http://brain.example:8789/downloads/windows-agent-script"
     assert data["agent_update_script_url"] == "http://brain.example:8789/downloads/windows-update-script"
 
     assert well_known.status_code == 200
@@ -170,6 +170,17 @@ def test_downloads_exposes_windows_agent_binary(monkeypatch, tmp_path):
 
     assert resp.status_code == 200
     assert "harry_agent.exe" in resp.headers["content-disposition"]
+
+
+def test_downloads_exposes_windows_agent_script(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+
+    with TestClient(main.app) as client:
+        resp = client.get("/downloads/windows-agent-script")
+
+    assert resp.status_code == 200
+    assert "install_agent.ps1" in resp.headers["content-disposition"]
+    assert "Discover-HarryBrain" in resp.text
 
 
 def test_downloads_exposes_windows_update_script(monkeypatch, tmp_path):
@@ -249,6 +260,7 @@ def test_downloads_removes_local_only_block(monkeypatch, tmp_path):
     monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://brain.example:8789")
     html = _render_downloads(monkeypatch, tmp_path)
 
+    assert "Recommended Windows installer" in html
     assert "Other machines should use this address." in html
     assert "Advanced configuration" in html
     assert "http://127.0.0.1:8789" not in html
@@ -384,6 +396,6 @@ def test_api_page_lists_core_endpoints_and_examples():
     assert "/ingest" in html
     assert "/inventory.json" in html
     assert "curl http://&lt;brain-ip&gt;:8789/health" in html
-    assert "Invoke-WebRequest http://&lt;brain-ip&gt;:8789/discover" in html
+    assert "Invoke-WebRequest http://&lt;brain-ip&gt;:8789/downloads/windows-agent-script" in html
     assert "import requests" in html
     assert "Privacy Mode Enabled" not in html

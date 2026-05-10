@@ -6,8 +6,10 @@ from pathlib import Path
 def test_windows_installer_mentions_brain_discovery_and_public_port():
     script = Path("agent/windows/install_agent.ps1").read_text(encoding="utf-8")
     dist_script = Path("app/dist/windows/install_agent.ps1").read_text(encoding="utf-8")
+    payload_script = Path("installers/windows/payload/install_agent.ps1").read_text(encoding="utf-8")
+    packaged_script = Path("installers/windows/brain-payload/_internal/dist/windows/install_agent.ps1").read_text(encoding="utf-8")
 
-    for text in (script, dist_script):
+    for text in (script, dist_script, payload_script, packaged_script):
         assert "Get-DiscoveryCandidates" in text
         assert "Discover-HarryBrain" in text
         assert "Test-BrainDiscoveryCandidate" in text
@@ -25,11 +27,26 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
 def test_windows_installer_examples_are_public_and_generic():
     script = Path("agent/windows/install_agent.ps1").read_text(encoding="utf-8")
     dist_script = Path("app/dist/windows/install_agent.ps1").read_text(encoding="utf-8")
+    payload_script = Path("installers/windows/payload/install_agent.ps1").read_text(encoding="utf-8")
+    packaged_script = Path("installers/windows/brain-payload/_internal/dist/windows/install_agent.ps1").read_text(encoding="utf-8")
 
-    for text in (script, dist_script):
+    for text in (script, dist_script, payload_script, packaged_script):
         assert "harry-brain:8787" not in text
         assert "White" + " Family" not in text
         assert "harry." + "white" + "familyhome.net" not in text
+
+
+def test_windows_agent_installer_sources_runtime_agent_package():
+    agent_iss = Path("installers/windows/iss/HarryAgent.iss").read_text(encoding="utf-8")
+    brain_iss = Path("installers/windows/iss/HarryBrain.iss").read_text(encoding="utf-8")
+
+    assert "..\\..\\..\\app\\dist\\windows\\*" in agent_iss
+    assert "install_agent.ps1" in agent_iss
+    assert "powershell.exe" in agent_iss
+    assert "HarryAgentSetup.exe" not in agent_iss or "install_agent.ps1" in agent_iss
+
+    assert "install_agent.ps1" in brain_iss
+    assert "HarryAgentSetup.exe" not in brain_iss
 
 
 def test_windows_brain_payload_has_current_agent_version():

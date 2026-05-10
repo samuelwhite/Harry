@@ -54,6 +54,7 @@ def render_api_docs_page() -> str:
         ("POST", "/ingest", "Agent telemetry ingest endpoint."),
         ("GET", "/inventory.json", "Inventory data for the UI and automation."),
         ("GET", "/api/services", "Service-awareness rows for the dashboard."),
+        ("GET", "/downloads/windows-agent-script", "Discovery-aware Windows installer script."),
         ("GET", "/downloads/windows-agent-exe", "Windows agent binary download."),
         ("GET", "/downloads/windows-update-script", "Windows updater helper script."),
     ]
@@ -130,7 +131,7 @@ def render_api_docs_page() -> str:
     </div>
     <div class="card">
       <div class="subcardtitle">PowerShell</div>
-      <pre style="margin:0; white-space:pre-wrap; font-size:12.5px; line-height:1.5; color:rgba(255,255,255,0.88);">{_html_escape("Invoke-WebRequest http://<brain-ip>:8789/discover | Select-Object -Expand Content")}</pre>
+      <pre style="margin:0; white-space:pre-wrap; font-size:12.5px; line-height:1.5; color:rgba(255,255,255,0.88);">{_html_escape("Invoke-WebRequest http://<brain-ip>:8789/downloads/windows-agent-script -OutFile install_agent.ps1")}</pre>
     </div>
     <div class="card">
       <div class="subcardtitle">Python requests</div>

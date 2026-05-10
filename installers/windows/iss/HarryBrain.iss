@@ -21,9 +21,6 @@ Name: "C:\ProgramData\Harry\brain\logs"
 
 [Files]
 Source: "..\brain-payload\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\..\..\downloads\HarryAgentInstall.sh"; DestDir: "{app}\downloads"; Flags: ignoreversion
-Source: "..\..\..\downloads\HarryAgentSetup.exe"; DestDir: "{app}\downloads"; Flags: ignoreversion
-Source: "..\..\..\downloads\HarryAgentSetup.exe"; DestDir: "{tmp}"; Flags: ignoreversion
 Source: "..\brain-payload\open_firewall.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\brain-payload\remove_firewall.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -32,7 +29,7 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -NoProfile -File ""{app}\open_firewall.ps1"" -Port 8787"; Flags: runhidden waituntilterminated
 Filename: "{app}\HarryBrainService.exe"; Parameters: "install"; Flags: runhidden waituntilterminated
 Filename: "{app}\HarryBrainService.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
-Filename: "{tmp}\HarryAgentSetup.exe"; Parameters: "/VERYSILENT"; Flags: waituntilterminated; StatusMsg: "Just finalising and setting up the Harry Agent on this machine..."
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\_internal\dist\windows\install_agent.ps1"""; Flags: runhidden waituntilterminated; StatusMsg: "Searching for Harry Brain and setting up the local agent..."
 Filename: "timeout.exe"; Parameters: "/T 3"; Flags: runhidden waituntilterminated
 Filename: "http://127.0.0.1:8787/"; Flags: shellexec postinstall skipifsilent
 

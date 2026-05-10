@@ -44,6 +44,8 @@ http://localhost:8787
 
 Your machine will automatically register as the first node.
 
+If you need the discovery-aware agent installer directly from the Downloads page, use the PowerShell installer script and let it find Harry Brain automatically.
+
 ---
 
 ## 🐧 Linux Brain (Most Stable)
@@ -87,9 +89,9 @@ curl -fsSL "$HARRY_PUBLIC_BASE_URL/scripts/install-agent.sh" | sudo -E bash
 
 Run:
 
-HarryAgentSetup.exe
+install_agent.ps1
 
-Tip: Use the exact Brain address shown in the UI
+Tip: The script will try to discover Harry Brain automatically before asking for a manual address.
 
 ---
 
