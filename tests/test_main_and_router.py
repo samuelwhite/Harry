@@ -369,6 +369,8 @@ def test_discovery_diagnostics_section_shows_address_context(monkeypatch, tmp_pa
     assert "Brain Address" in html
     assert "Canonical address" in html
     assert "Recommended LAN" in html
+    assert "Container networking" in html
+    assert "Discovery methods" in html
 
 
 def test_api_page_lists_core_endpoints_and_examples():

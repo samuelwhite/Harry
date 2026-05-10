@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 from fastapi import Request
 
-from app.brain_address import resolve_brain_address
+from app.brain_address import discovery_methods_enabled, resolve_brain_address
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
 from app.ui.db import _load_schema_current
 from app.ui.fleet import build_nodeviews, _render_advice_queue, _service_status_class, _service_status_label
@@ -79,6 +79,11 @@ def _discovery_rows(request: Request) -> List[tuple[str, str, str]]:
     display = info.get("display_url") or "Could not determine"
     warning = info.get("warning") or "None"
     installer = "Ready" if info.get("display_url") else "Manual input required"
+    container_runtime = "Yes" if info.get("container_runtime") else "No"
+    detected_lan = info.get("detected_lan_ip") or "Not detected"
+    rejected = info.get("rejected_lan_candidates") or []
+    rejected_txt = ", ".join(str(x) for x in rejected[:8]) if rejected else "None"
+    methods = ", ".join(discovery_methods_enabled())
 
     return [
         ("Brain Address", "online", f"Other machines should use: {display}"),
@@ -86,6 +91,10 @@ def _discovery_rows(request: Request) -> List[tuple[str, str, str]]:
         ("Recommended LAN", "online" if info.get("recommended_lan_url") else "warning", str(recommended)),
         ("Discovery endpoint", "online", "Installers can query /discover or /.well-known/harry-brain."),
         ("Reverse proxy", "info" if reverse_proxy == "Likely" else "online", reverse_proxy),
+        ("Container networking", "warn" if info.get("container_runtime") else "online", container_runtime),
+        ("Detected LAN address", "online" if info.get("detected_lan_ip") else "warning", str(detected_lan)),
+        ("Rejected addresses", "warning" if rejected else "online", rejected_txt),
+        ("Discovery methods", "online", methods),
         ("Installer discovery", "online" if info.get("display_url") else "warning", installer),
         ("Warning", "warning" if info.get("warning") else "online", warning),
     ]

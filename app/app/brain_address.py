@@ -7,6 +7,7 @@ import re
 import socket
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlsplit, urlunsplit
 
@@ -16,6 +17,33 @@ BRIDGE_NETWORKS = (
     ipaddress.ip_network("192.168.240.0/20"),
     ipaddress.ip_network("169.254.0.0/16"),
 )
+
+
+def runtime_is_container() -> bool:
+    hints = (
+        os.environ.get("container"),
+        os.environ.get("KUBERNETES_SERVICE_HOST"),
+        os.environ.get("DOCKER_CONTAINER"),
+    )
+    if any(str(h or "").strip() for h in hints):
+        return True
+
+    try:
+        if Path("/.dockerenv").exists() or Path("/run/.containerenv").exists():
+            return True
+    except Exception:
+        pass
+
+    try:
+        cgroup = Path("/proc/1/cgroup")
+        if cgroup.exists():
+            raw = cgroup.read_text(encoding="utf-8", errors="replace").lower()
+            if any(token in raw for token in ("docker", "kubepods", "containerd", "podman")):
+                return True
+    except Exception:
+        pass
+
+    return False
 
 
 def _safe_port(value: str | None) -> int | None:
@@ -116,10 +144,39 @@ def _host_is_publicly_usable(host: str) -> bool:
         return False
     if addr.is_unspecified or addr.is_loopback or addr.is_link_local:
         return False
-    if addr in BRIDGE_NETWORKS:
+    if any(addr in net for net in BRIDGE_NETWORKS):
         return False
 
     return True
+
+
+def _reject_lan_candidate(ip: str, *, container_runtime: bool = False) -> str | None:
+    ip = (ip or "").strip()
+    if not ip:
+        return None
+
+    if container_runtime:
+        return "container runtime"
+
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return "not an IP address"
+
+    if addr.version != 4:
+        return "not IPv4"
+    if addr.is_loopback:
+        return "loopback"
+    if addr.is_link_local:
+        return "link-local"
+    if addr.is_unspecified:
+        return "unspecified"
+    if any(addr in net for net in BRIDGE_NETWORKS):
+        return "bridge network"
+    if not addr.is_private:
+        return "not RFC1918"
+
+    return None
 
 
 def _request_public_candidate(request: Any | None) -> str | None:
@@ -208,7 +265,7 @@ def _score_lan_ip(ip: str) -> int:
         return -1000
     if addr.is_loopback or addr.is_link_local or addr.is_unspecified:
         return -1000
-    if addr in BRIDGE_NETWORKS:
+    if any(addr in net for net in BRIDGE_NETWORKS):
         return -1000
     if not addr.is_private:
         return -1000
@@ -223,6 +280,30 @@ def _score_lan_ip(ip: str) -> int:
         score -= 100
 
     return score
+
+
+def _gather_lan_candidates() -> list[str]:
+    candidates: list[str] = []
+
+    udp_ip = _udp_detect_lan_ip()
+    if udp_ip:
+        candidates.append(udp_ip)
+
+    if sys.platform.startswith("win"):
+        candidates.extend(_windows_lan_candidates())
+    else:
+        candidates.extend(_posix_lan_candidates())
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for ip in candidates:
+        ip = (ip or "").strip()
+        if not ip or ip in seen:
+            continue
+        seen.add(ip)
+        out.append(ip)
+
+    return out
 
 
 def _udp_detect_lan_ip() -> str | None:
@@ -381,15 +462,7 @@ $adapters |
 
 
 def detect_lan_ip() -> str | None:
-    udp_ip = _udp_detect_lan_ip()
-    if udp_ip:
-        return udp_ip
-
-    candidates: list[str] = []
-    if sys.platform.startswith("win"):
-        candidates.extend(_windows_lan_candidates())
-    else:
-        candidates.extend(_posix_lan_candidates())
+    candidates = _gather_lan_candidates()
 
     seen: set[str] = set()
     filtered: list[str] = []
@@ -450,6 +523,8 @@ def recommended_lan_ip() -> str | None:
             return None
         if addr.version == 4:
             return raw
+    if runtime_is_container():
+        return None
     return detect_lan_ip()
 
 
@@ -464,6 +539,7 @@ def resolve_brain_address(request: Any | None = None) -> Dict[str, Any]:
     canonical = canonical_public_base_url()
     recommended = recommended_lan_url()
     request_candidate = _request_public_candidate(request)
+    container_runtime = runtime_is_container()
     if canonical:
         source = "canonical"
         display_url = canonical
@@ -475,14 +551,14 @@ def resolve_brain_address(request: Any | None = None) -> Dict[str, Any]:
             "Harry could not determine a reliable external Brain address automatically. "
             "Set HARRY_PUBLIC_BASE_URL for the canonical address that other machines should use."
         )
-    elif request_candidate:
+    elif not container_runtime and request_candidate:
         source = "request-host"
         display_url = request_candidate.rstrip("/")
         warning = (
             "Harry is using the current request address for now. "
             "Set HARRY_PUBLIC_BASE_URL to make the Brain address canonical for other machines."
         )
-    elif recommended:
+    elif not container_runtime and recommended:
         source = "lan-detected"
         display_url = recommended
         warning = (
@@ -493,8 +569,8 @@ def resolve_brain_address(request: Any | None = None) -> Dict[str, Any]:
         source = "unresolved"
         display_url = None
         warning = (
-            "Harry could not determine a reliable external Brain address automatically. "
-            "Set HARRY_PUBLIC_BASE_URL to make the Brain address canonical for other machines."
+            "Harry could not determine a reliable LAN address automatically. "
+            "Set HARRY_PUBLIC_BASE_URL or HARRY_BRAIN_LAN_IP to make the Brain address canonical for other machines."
         )
 
     try:
@@ -510,9 +586,25 @@ def resolve_brain_address(request: Any | None = None) -> Dict[str, Any]:
         "source": source,
         "public_port": public_port(),
         "local_url": f"http://127.0.0.1:{request_port or public_port()}",
+        "container_runtime": container_runtime,
+        "detected_lan_ip": detect_lan_ip(),
+        "rejected_lan_candidates": [
+            ip
+            for ip in _gather_lan_candidates()
+            if _reject_lan_candidate(ip, container_runtime=container_runtime) is not None
+        ],
     }
 
 
 def discovery_payload_base_url() -> str | None:
     info = resolve_brain_address()
     return info["canonical_base_url"] or info["recommended_lan_url"]
+
+
+def discovery_methods_enabled() -> list[str]:
+    methods = ["HARRY_PUBLIC_BASE_URL", "HARRY_BRAIN_LAN_IP"]
+    if runtime_is_container():
+        methods.append("manual address entry")
+    else:
+        methods.extend(["request host", "LAN detection", "installer subnet discovery"])
+    return methods
