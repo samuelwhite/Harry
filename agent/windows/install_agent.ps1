@@ -224,14 +224,25 @@ function Discover-HarryBrain {
         [int]$Port
     )
 
+    Write-Host "Searching for Harry Brain..."
+
+    $candidates = Get-DiscoveryCandidates -Port $Port
+    Write-Host ("Discovery candidates: {0}" -f $candidates.Count)
+
     $found = New-Object System.Collections.Generic.List[string]
     $seen = New-Object System.Collections.Generic.HashSet[string]
 
-    foreach ($candidate in (Get-DiscoveryCandidates -Port $Port)) {
+    foreach ($candidate in $candidates) {
+        Write-Host ("  probing {0}" -f $candidate)
         $discovered = Test-BrainDiscoveryCandidate -BrainUrl $candidate
         if ($discovered -and $seen.Add($discovered)) {
             [void]$found.Add($discovered)
+            Write-Host ("    discovered {0}" -f $discovered)
         }
+    }
+
+    if ($found.Count -eq 0) {
+        Write-Host "No Harry Brain discovery responses were found from local candidates."
     }
 
     return $found

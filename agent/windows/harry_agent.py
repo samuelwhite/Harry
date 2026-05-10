@@ -10,11 +10,7 @@ from pathlib import Path
 import urllib.error
 import urllib.request
 
-try:
-    import psutil
-except ImportError:
-    print("psutil not installed")
-    raise SystemExit(1)
+psutil = None
 
 AGENT_VERSION = "0.2.5"
 SCHEMA_VERSION = "0.2.3"
@@ -61,6 +57,20 @@ def _install_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
+
+
+def _ensure_psutil():
+    global psutil
+    if psutil is not None:
+        return psutil
+
+    try:
+        import psutil as psutil_module
+    except ImportError:
+        return None
+
+    psutil = psutil_module
+    return psutil
 
 
 def _update_script_path() -> Path:
@@ -274,7 +284,10 @@ def get_cpu_name() -> str | None:
 
 def get_cpu_cores() -> int | None:
     try:
-        return psutil.cpu_count(logical=True)
+        module = _ensure_psutil()
+        if module is None:
+            return None
+        return module.cpu_count(logical=True)
     except Exception:
         return None
 
@@ -383,28 +396,40 @@ $arr  = Get-CimInstance Win32_PhysicalMemoryArray | Select-Object MemoryDevices,
 
 def get_cpu_load_1m() -> float | None:
     try:
-        return round(psutil.cpu_percent(interval=1) / 100.0, 2)
+        module = _ensure_psutil()
+        if module is None:
+            return None
+        return round(module.cpu_percent(interval=1) / 100.0, 2)
     except Exception:
         return None
 
 
 def get_mem_used_pct() -> float | None:
     try:
-        return round(psutil.virtual_memory().percent, 2)
+        module = _ensure_psutil()
+        if module is None:
+            return None
+        return round(module.virtual_memory().percent, 2)
     except Exception:
         return None
 
 
 def get_disk_used_pct() -> float | None:
     try:
-        return round(psutil.disk_usage("C:\\").percent, 2)
+        module = _ensure_psutil()
+        if module is None:
+            return None
+        return round(module.disk_usage("C:\\").percent, 2)
     except Exception:
         return None
 
 
 def get_disk_size_gb() -> float | None:
     try:
-        total_bytes = psutil.disk_usage("C:\\").total
+        module = _ensure_psutil()
+        if module is None:
+            return None
+        total_bytes = module.disk_usage("C:\\").total
         return round(total_bytes / (1024 ** 3), 2)
     except Exception:
         return None
@@ -655,6 +680,7 @@ def build_diagnostics_summary() -> dict:
         "agent_version": AGENT_VERSION,
         "brain_url": BRAIN_URL,
         "endpoint": ENDPOINT,
+        "psutil_available": _ensure_psutil() is not None,
         "discovery_ok": bool(discovery.get("ok")),
         "discovery_service": discovery.get("service"),
         "discovery_agent_version": discovery.get("agent_version"),
@@ -682,7 +708,8 @@ def main() -> None:
         return
 
     if args.diagnostics:
-        print(json.dumps(build_diagnostics_summary(), indent=2, sort_keys=True))
+        summary = build_diagnostics_summary()
+        print(json.dumps(summary, indent=2, sort_keys=True))
         return
 
     print("Harry Windows Agent starting")

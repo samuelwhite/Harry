@@ -11,6 +11,8 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "Get-DiscoveryCandidates" in text
         assert "Discover-HarryBrain" in text
         assert "Test-BrainDiscoveryCandidate" in text
+        assert "Searching for Harry Brain" in text
+        assert "Discovery candidates" in text
         assert "update_agent.ps1" in text
         assert "HARRY_PUBLIC_BASE_URL" in text
         assert "harry.local" in text
@@ -38,3 +40,12 @@ def test_windows_brain_payload_has_current_agent_version():
     assert 'AGENT_VERSION="0.2.3"' not in payload_script
     assert "BRAIN_VERSION=\"2026.05.09\"" in payload_script
     assert "AppVersion=2026.05.09" in setup_iss
+
+
+def test_windows_agent_docs_mention_diagnostics_commands():
+    readme = Path("agent/windows/README.txt").read_text(encoding="utf-8")
+    start_here = Path("agent/windows/START-HERE.txt").read_text(encoding="utf-8")
+
+    for text in (readme, start_here):
+        assert "--diagnostics" in text
+        assert "--version" in text

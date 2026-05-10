@@ -67,6 +67,17 @@ Agent errors
 C:\ProgramData\Harry\HarryAgentService.err.log
 
 
+Diagnostics
+
+Run this to print a safe local summary:
+
+  C:\ProgramData\Harry\harry_agent.exe --diagnostics
+
+Run this to confirm the installed version:
+
+  C:\ProgramData\Harry\harry_agent.exe --version
+
+
 View logs live
 
 Open PowerShell and run:

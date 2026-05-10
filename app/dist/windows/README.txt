@@ -76,6 +76,17 @@ HarryAgentService.out.log
 HarryAgentService.err.log
 
 
+Diagnostics
+
+To print a safe local summary of the installed agent, run:
+
+  C:\ProgramData\Harry\harry_agent.exe --diagnostics
+
+To confirm the installed version, run:
+
+  C:\ProgramData\Harry\harry_agent.exe --version
+
+
 Viewing logs
 
 To watch the agent log live in PowerShell:
