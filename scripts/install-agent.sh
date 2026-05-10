@@ -6,6 +6,7 @@ AGENT_PATH="${AGENT_DIR}/harry_agent.sh"
 TMP_AGENT="$(mktemp /tmp/harry_agent_install.XXXXXX.sh)"
 ALLOW_REPOINT="${HARRY_ALLOW_REPOINT:-0}"
 HARRY_BASE_URL="${HARRY_BASE_URL:-}"
+HARRY_PUBLIC_BASE_URL="${HARRY_PUBLIC_BASE_URL:-}"
 HARRY_INGEST_URL="${HARRY_INGEST_URL:-}"
 HARRY_URL="${HARRY_URL:-}"
 HARRY_PUBLIC_PORT="${HARRY_PUBLIC_PORT:-8789}"
@@ -98,6 +99,12 @@ install_optional_enrichers() {
 current_configured_base_url() {
   local service_file="/etc/systemd/system/harry-agent.service"
   if [ -f "$service_file" ]; then
+    awk -F= '/Environment="HARRY_PUBLIC_BASE_URL=/{print $2}' "$service_file" \
+      | sed 's/"$//' \
+      | head -n1
+    return 0
+  fi
+  if [ -f "$service_file" ]; then
     awk -F= '/Environment="HARRY_BASE_URL=/{print $2}' "$service_file" \
       | sed 's/"$//' \
       | head -n1
@@ -187,6 +194,17 @@ resolve_brain_url() {
   local discovered=()
   local line
   local normalized
+
+  if [ -n "${HARRY_PUBLIC_BASE_URL:-}" ]; then
+    if ! normalized="$(normalize_brain_url "$HARRY_PUBLIC_BASE_URL" 2>/dev/null)"; then
+      echo "ERROR: HARRY_PUBLIC_BASE_URL is invalid." >&2
+      return 1
+    fi
+    HARRY_PUBLIC_BASE_URL="$normalized"
+    HARRY_BASE_URL="$normalized"
+    HARRY_INGEST_URL="${HARRY_INGEST_URL:-$HARRY_BASE_URL/ingest}"
+    return 0
+  fi
 
   if [ -n "${HARRY_BASE_URL:-}" ]; then
     if ! normalized="$(normalize_brain_url "$HARRY_BASE_URL" 2>/dev/null)"; then
@@ -362,6 +380,7 @@ EOF_UNIT
 
 if [ -n "${HARRY_BASE_URL:-}" ]; then
   cat >> /etc/systemd/system/harry-agent.service <<EOF_UNIT
+Environment="HARRY_PUBLIC_BASE_URL=${HARRY_BASE_URL}"
 Environment="HARRY_BASE_URL=${HARRY_BASE_URL}"
 Environment="HARRY_INGEST_URL=${HARRY_BASE_URL}/ingest"
 EOF_UNIT

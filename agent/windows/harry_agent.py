@@ -192,7 +192,9 @@ def maybe_self_update() -> bool:
 
 config = load_config()
 BRAIN_URL = (
-    config.get("brain_url")
+    config.get("public_base_url")
+    or config.get("brain_url")
+    or os.environ.get("HARRY_PUBLIC_BASE_URL")
     or os.environ.get("HARRY_BASE_URL")
     or "http://harry-brain:8789"
 ).rstrip("/")

@@ -10,8 +10,13 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from typing import Callable
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 DISCOVERY_PATHS = ("/discover", "/.well-known/harry-brain")
 BRIDGE_NETWORKS = (
@@ -178,7 +183,12 @@ def probe_candidate(base_url: str, timeout: float = 1.2) -> str | None:
                 continue
             if payload.get("service") != "harry-brain" or payload.get("ok") is not True:
                 continue
-            discovered = str(payload.get("base_url") or base).rstrip("/")
+            discovered = (
+                str(payload.get("canonical_base_url") or "").strip()
+                or str(payload.get("base_url") or "").strip()
+                or str(payload.get("recommended_lan_url") or "").strip()
+                or base
+            ).rstrip("/")
             return discovered
         except Exception:
             continue

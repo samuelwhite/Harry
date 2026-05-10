@@ -201,6 +201,12 @@ function Test-BrainDiscoveryCandidate {
             $response = Invoke-WebRequest -Uri $url -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
             $payload = $response.Content | ConvertFrom-Json
             if ($payload -and $payload.service -eq "harry-brain" -and $payload.ok -eq $true) {
+                if ($payload.canonical_base_url) {
+                    return ($payload.canonical_base_url).TrimEnd("/")
+                }
+                if ($payload.recommended_lan_url) {
+                    return ($payload.recommended_lan_url).TrimEnd("/")
+                }
                 if ($payload.base_url) {
                     return ($payload.base_url).TrimEnd("/")
                 }
@@ -414,31 +420,43 @@ if (-not (Test-Path $ConfigPath)) {
     Write-Host "  http://192.168.1.100:8789"
     Write-Host ""
 
-    $publicPort = Get-DefaultBrainPort
-    $discovered = Discover-HarryBrain -Port $publicPort
     $brain = $null
-
-    if ($discovered.Count -eq 1) {
-        $brain = $discovered[0]
-        Write-Host "Auto-discovered Harry Brain: $brain"
-    } elseif ($discovered.Count -gt 1) {
-        if (-not (Test-IsAdmin)) {
-            Write-Host "Multiple Harry Brain instances were discovered, but the installer cannot prompt here." -ForegroundColor Yellow
+    if (-not [string]::IsNullOrWhiteSpace($env:HARRY_PUBLIC_BASE_URL)) {
+        try {
+            $brain = Normalize-BrainUrl $env:HARRY_PUBLIC_BASE_URL
+            Write-Host "Using HARRY_PUBLIC_BASE_URL: $brain"
+        } catch {
+            Write-Host ""
+            Write-Host "ERROR: HARRY_PUBLIC_BASE_URL is invalid." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
         }
+    } else {
+        $publicPort = Get-DefaultBrainPort
+        $discovered = Discover-HarryBrain -Port $publicPort
 
-        Write-Host ""
-        Write-Host "Multiple Harry Brain instances were discovered:"
-        for ($i = 0; $i -lt $discovered.Count; $i++) {
-            Write-Host ("  {0}) {1}" -f ($i + 1), $discovered[$i])
-        }
-        Write-Host "  m) Enter a Brain address manually"
-        $choice = Read-Host "Choose a Brain [1]"
-        if ([string]::IsNullOrWhiteSpace($choice)) {
-            $choice = "1"
-        }
+        if ($discovered.Count -eq 1) {
+            $brain = $discovered[0]
+            Write-Host "Auto-discovered Harry Brain: $brain"
+        } elseif ($discovered.Count -gt 1) {
+            if (-not (Test-IsAdmin)) {
+                Write-Host "Multiple Harry Brain instances were discovered, but the installer cannot prompt here." -ForegroundColor Yellow
+            }
 
-        if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $discovered.Count) {
-            $brain = $discovered[[int]$choice - 1]
+            Write-Host ""
+            Write-Host "Multiple Harry Brain instances were discovered:"
+            for ($i = 0; $i -lt $discovered.Count; $i++) {
+                Write-Host ("  {0}) {1}" -f ($i + 1), $discovered[$i])
+            }
+            Write-Host "  m) Enter a Brain address manually"
+            $choice = Read-Host "Choose a Brain [1]"
+            if ([string]::IsNullOrWhiteSpace($choice)) {
+                $choice = "1"
+            }
+
+            if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $discovered.Count) {
+                $brain = $discovered[[int]$choice - 1]
+            }
         }
     }
 
@@ -501,7 +519,7 @@ if (-not (Test-Path $ConfigPath)) {
         exit 1
     }
 
-    @{ brain_url = $brain } |
+    @{ public_base_url = $brain; brain_url = $brain } |
         ConvertTo-Json |
         Set-Content -Encoding UTF8 $ConfigPath
 

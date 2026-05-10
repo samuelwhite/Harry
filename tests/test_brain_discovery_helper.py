@@ -50,3 +50,37 @@ def test_discover_brain_urls_returns_unique_matches_from_probe_results(monkeypat
     found = helper.discover_brain_urls(probe_fn=fake_probe, workers=2)
 
     assert found == ["http://192.168.1.20:8789", "http://192.168.1.10:8789"]
+
+
+def test_probe_candidate_prefers_canonical_and_recommended_addresses(monkeypatch):
+    helper = _load_helper()
+
+    class FakeResponse:
+        def __init__(self, payload: dict):
+            self._payload = payload
+
+        def read(self):
+            import json
+
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_urlopen(req, timeout=1.2):
+        return FakeResponse(
+            {
+                "service": "harry-brain",
+                "ok": True,
+                "canonical_base_url": "https://brain.example",
+                "recommended_lan_url": "http://192.168.1.20:8789",
+                "base_url": "http://192.168.1.20:8789",
+            }
+        )
+
+    monkeypatch.setattr(helper.urllib.request, "urlopen", fake_urlopen)
+
+    assert helper.probe_candidate("http://192.168.1.20:8789") == "https://brain.example"

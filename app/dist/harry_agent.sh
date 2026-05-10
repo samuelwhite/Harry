@@ -220,11 +220,16 @@ if ! command -v "$CURL" >/dev/null 2>&1; then
   exit 20
 fi
 
+HARRY_PUBLIC_BASE_URL="${HARRY_PUBLIC_BASE_URL:-}"
 HARRY_BASE_URL="${HARRY_BASE_URL:-}"
 HARRY_INGEST_URL="${HARRY_INGEST_URL:-}"
 HARRY_URL="${HARRY_URL:-}"
 
-if [ -n "$HARRY_BASE_URL" ]; then
+if [ -n "$HARRY_PUBLIC_BASE_URL" ]; then
+  HARRY_PUBLIC_BASE_URL="${HARRY_PUBLIC_BASE_URL%/}"
+  HARRY_BASE_URL="$HARRY_PUBLIC_BASE_URL"
+  HARRY_INGEST_URL="${HARRY_INGEST_URL:-$HARRY_BASE_URL/ingest}"
+elif [ -n "$HARRY_BASE_URL" ]; then
   HARRY_BASE_URL="${HARRY_BASE_URL%/}"
   HARRY_INGEST_URL="${HARRY_INGEST_URL:-$HARRY_BASE_URL/ingest}"
 else
@@ -234,7 +239,7 @@ else
   HARRY_INGEST_URL="${HARRY_INGEST_URL:-}"
 
   if [ -z "$HARRY_INGEST_URL" ]; then
-    echo "ERROR: Harry agent requires HARRY_BASE_URL or HARRY_INGEST_URL to be set." >&2
+    echo "ERROR: Harry agent requires HARRY_PUBLIC_BASE_URL, HARRY_BASE_URL, or HARRY_INGEST_URL to be set." >&2
     exit 21
   fi
 

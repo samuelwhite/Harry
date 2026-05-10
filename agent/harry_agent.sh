@@ -227,6 +227,7 @@ if ! command -v "$CURL" >/dev/null 2>&1; then
   exit 20
 fi
 
+HARRY_PUBLIC_BASE_URL="${HARRY_PUBLIC_BASE_URL:-}"
 HARRY_BASE_URL="${HARRY_BASE_URL:-}"
 HARRY_INGEST_URL="${HARRY_INGEST_URL:-}"
 HARRY_URL="${HARRY_URL:-}"
@@ -256,6 +257,11 @@ resolve_brain_url() {
   local candidates=()
   local candidate
   local cached
+
+  if [ -n "${HARRY_PUBLIC_BASE_URL:-}" ]; then
+    echo "${HARRY_PUBLIC_BASE_URL%/}"
+    return 0
+  fi
 
   if [ -n "${HARRY_BASE_URL:-}" ]; then
     echo "${HARRY_BASE_URL%/}"
@@ -300,8 +306,8 @@ resolve_brain_url() {
 
 if ! HARRY_BASE_URL="$(resolve_brain_url)"; then
   echo "ERROR: Harry agent could not determine the Brain URL." >&2
-  echo "Tried, in order: HARRY_BASE_URL, cached last-known-good URL, http://harry-brain.local:8789, http://localhost:8789" >&2
-  echo "Set HARRY_BASE_URL explicitly or ensure the Brain is reachable on one of the fallback addresses." >&2
+  echo "Tried, in order: HARRY_PUBLIC_BASE_URL, HARRY_BASE_URL, cached last-known-good URL, http://harry-brain.local:8789, http://localhost:8789" >&2
+  echo "Set HARRY_PUBLIC_BASE_URL explicitly or ensure the Brain is reachable on one of the fallback addresses." >&2
   exit 21
 fi
 

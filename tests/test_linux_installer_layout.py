@@ -12,6 +12,7 @@ def test_install_agent_prefers_packaged_script_before_repo_fallback():
     assert repo != -1
     assert packaged < repo
     assert "Tried Brain download" in script
+    assert "HARRY_PUBLIC_BASE_URL" in script
 
 
 def test_install_sh_stages_agent_script_into_packaged_scripts():
