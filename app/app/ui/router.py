@@ -31,6 +31,7 @@ from app.ui.db import (
     hide_node,
     unhide_node,
 )
+from app.brain_address import resolve_brain_address as _resolve_brain_address_info
 from app.ui.diagnostics import render_diagnostics_page
 from app.ui.api_docs import render_api_docs_page
 from app.ui.fleet import render_fleet_page
@@ -479,43 +480,9 @@ def _build_url(scheme: str, host: str, port: int | None = None) -> str:
 
 
 def _resolve_brain_urls(request: Request) -> tuple[str, str]:
-    configured = (os.environ.get("HARRY_PUBLIC_BASE_URL") or "").strip()
-    brain_lan_ip = (os.environ.get("HARRY_BRAIN_LAN_IP") or "").strip()
-    request_candidate = _request_public_candidate(request)
-    request_port = request_candidate[2] if request_candidate else None
-
-    public_port = _resolve_public_port(request, configured, request_port=request_port)
-    local_port = _resolve_local_port(request, configured, public_port)
-
-    public_url = ""
-    if configured and not _is_placeholder_brain_address(configured):
-        parsed = _parse_url_bits(configured)
-        if parsed and _host_is_publicly_usable(parsed[1]):
-            scheme, host, port = parsed
-            public_url = _build_url(scheme, host, int(port or public_port))
-
-    if not public_url and brain_lan_ip and not _is_placeholder_brain_address(brain_lan_ip) and not _host_is_loopback(brain_lan_ip):
-        public_url = _build_url("http", brain_lan_ip, public_port)
-
-    if not public_url and request_candidate:
-        scheme, host, port, https_domain = request_candidate
-        if https_domain:
-            public_url = _build_url("https", host, None)
-        else:
-            public_url = _build_url(scheme, host, int(port or public_port))
-
-    if not public_url:
-        lan_ip = _detect_lan_ip()
-        if lan_ip:
-            if _host_is_publicly_usable(lan_ip):
-                public_url = _build_url("http", lan_ip, public_port)
-        else:
-            public_url = _build_url("http", "<brain-ip>", public_port)
-
-    if not public_url:
-        public_url = _build_url("http", "<brain-ip>", public_port)
-
-    local_url = _build_url("http", "127.0.0.1", local_port)
+    info = _resolve_brain_address_info(request)
+    public_url = str(info.get("display_url") or "").strip() or f"http://<brain-ip>:{info.get('public_port') or 8789}"
+    local_url = str(info.get("local_url") or "").strip() or "http://127.0.0.1:8789"
     return public_url, local_url
 
 
@@ -561,33 +528,8 @@ def _human_size(num_bytes: int) -> str:
 
 
 def _brain_url_warning(url: str) -> str | None:
-    lowered = (url or "").strip().lower()
-
-    if not lowered:
-        return "Harry could not determine a reliable Brain LAN address automatically."
-
-    if _is_placeholder_brain_address(lowered) or "__harry_public_base_url__" in lowered or "__" in lowered:
-        return "Harry could not determine a reliable Brain LAN address automatically."
-
-    if "127.0.0.1" in lowered or "localhost" in lowered:
-        return (
-            "This Brain address only works on the Brain machine itself. "
-            "When installing Harry Agent on another machine, use this machine's LAN IP address instead."
-        )
-
-    if " " in lowered:
-        return (
-            "The current Brain address does not look valid. "
-            "It should usually look like http://192.168.1.100:8789"
-        )
-
-    if not (lowered.startswith("http://") or lowered.startswith("https://")):
-        return (
-            "The current Brain address does not look valid. "
-            "It should usually look like http://192.168.1.100:8789"
-        )
-
-    return None
+    info = _resolve_brain_address_info(None)
+    return str(info.get("warning") or "").strip() or None
 
 
 def _downloads_fallback_help_html() -> str:
@@ -596,6 +538,7 @@ def _downloads_fallback_help_html() -> str:
   <details class="details card" style="padding:18px 20px;">
     <summary style="font-weight:700;">Need help finding the address?</summary>
     <div class="subtitle" style="margin-top:12px;">Installers will try to discover Harry Brain automatically.</div>
+    <div class="subtitle" style="margin-top:10px;">If discovery fails, enter the LAN address of this Brain machine.</div>
     <div class="subtitle" style="margin-top:10px;">Windows: run <code>ipconfig</code>.</div>
     <div class="subtitle" style="margin-top:8px;">Linux/macOS: run <code>hostname -I</code>.</div>
     <div class="subtitle" style="margin-top:10px;">Use the IPv4 address that other machines on your network can reach.</div>
@@ -612,7 +555,7 @@ def _downloads_advanced_help_html() -> str:
     <summary style="font-weight:700;">Advanced configuration</summary>
     <div class="subtitle" style="margin-top:12px;">Only use this if you want to set the address manually.</div>
     <div class="subtitle" style="margin-top:10px;"><code>HARRY_PUBLIC_BASE_URL=http://&lt;your-brain-ip&gt;:8789</code></div>
-    <div class="subtitle" style="margin-top:8px;"><code>HARRY_BRAIN_LAN_IP=YOUR-BRAIN-IP</code> with <code>HARRY_PUBLIC_PORT=8789</code></div>
+    <div class="subtitle" style="margin-top:8px;"><code>YOUR-BRAIN-IP</code> with <code>HARRY_BRAIN_LAN_IP</code> and <code>HARRY_PUBLIC_PORT</code></div>
   </details>
 </section>
 """
@@ -625,9 +568,11 @@ def ui_health() -> PlainTextResponse:
 
 @router.get("/downloads", response_class=HTMLResponse)
 def downloads_page(request: Request) -> HTMLResponse:
-    brain_url, _local_url = _resolve_brain_urls(request)
-    warning = _brain_url_warning(brain_url)
-    needs_guidance = warning is not None or _is_placeholder_brain_address(brain_url)
+    info = _resolve_brain_address_info(request)
+    brain_url = str(info.get("display_url") or "").strip()
+    warning = str(info.get("warning") or "").strip() or None
+    needs_guidance = not brain_url or _is_placeholder_brain_address(brain_url)
+    warning_note = warning if warning and brain_url and not _is_placeholder_brain_address(brain_url) else None
     downloads_dir = _downloads_dir()
 
     files: list[dict[str, str]] = []
@@ -697,7 +642,7 @@ def downloads_page(request: Request) -> HTMLResponse:
 </div>
 """
 
-    warning_html = _downloads_fallback_help_html() if needs_guidance else ""
+    warning_html = _downloads_fallback_help_html() if (warning or needs_guidance) else ""
     advanced_html = _downloads_advanced_help_html()
 
     content = f"""
@@ -705,14 +650,16 @@ def downloads_page(request: Request) -> HTMLResponse:
 
 <section class="section" id="downloads-overview">
   <div class="card">
-    <div class="k">Recommended Brain address</div>
+    <div class="k">Brain Address</div>
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <div class="v big">
-        <code id="brain-url">{html.escape(brain_url if not needs_guidance else "Could not determine automatically")}</code>
+        <code id="brain-url">{html.escape(brain_url if brain_url else "Could not determine automatically")}</code>
       </div>
-      {"<button class=\"btn\" onclick=\"navigator.clipboard.writeText(document.getElementById('brain-url').innerText)\">Copy</button>" if not needs_guidance else ""}
+      {"<button class=\"btn\" onclick=\"navigator.clipboard.writeText(document.getElementById('brain-url').innerText)\">Copy</button>" if brain_url and not _is_placeholder_brain_address(brain_url) else ""}
     </div>
-    <div class="subtitle">The installer will try to find Harry Brain automatically. If discovery fails, enter the LAN address of this machine.</div>
+    <div class="subtitle">Other machines should use this address.</div>
+    {"<div class=\"subtitle\" style=\"margin-top:8px; color:rgba(251,191,36,0.95);\">Harry could not determine a reliable external address automatically. Set <code>HARRY_PUBLIC_BASE_URL</code> to define the canonical Brain address.</div>" if needs_guidance else ""}
+    {"<div class=\"subtitle\" style=\"margin-top:8px; color:rgba(251,191,36,0.95);\">"+html.escape(warning_note)+"</div>" if warning_note else ""}
   </div>
 </section>
 
@@ -977,7 +924,7 @@ def diagnostics(request: Request) -> HTMLResponse:
     hours = int(_clamp(hours, 1, 24 * 14))
 
     debug = (request.query_params.get("debug") or "").strip().lower() in ("1", "true", "yes", "y")
-    return HTMLResponse(render_diagnostics_page(hours=hours, debug=debug))
+    return HTMLResponse(render_diagnostics_page(request=request, hours=hours, debug=debug))
 
 
 @router.get("/api", response_class=HTMLResponse)

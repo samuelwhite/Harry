@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from app.versions import AGENT_VERSION, BRAIN_VERSION
+from app.brain_address import resolve_brain_address
 
 from .db import _load_schema_current
 
@@ -44,6 +45,9 @@ def _endpoint_row(method: str, path: str, purpose: str) -> str:
 
 def render_api_docs_page() -> str:
     schema_current = _load_schema_current()
+    address = resolve_brain_address()
+    current_address = address.get("display_url") or "Could not determine automatically"
+    address_warning = address.get("warning") or ""
     endpoints = [
         ("GET", "/health", "Brain status, versions, and dist health."),
         ("GET", "/discover", "Discovery payload for installers and local tooling."),
@@ -82,6 +86,8 @@ def render_api_docs_page() -> str:
       Harry’s endpoints are designed for self-hosted use on a local network or behind a reverse proxy.
       Installers will try to discover Harry Brain automatically and fall back to a manual URL when needed.
     </div>
+    <div class="subtitle" style="margin-top:10px;">Brain Address: <code>{_html_escape(str(current_address))}</code></div>
+    {"<div class=\"subtitle\" style=\"margin-top:8px; color:rgba(251,191,24,0.95);\">" + _html_escape(str(address_warning)) + "</div>" if address_warning else ""}
   </div>
 </div>
 

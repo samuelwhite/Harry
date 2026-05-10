@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import ipaddress
 from typing import Any, Dict, List
 
+from fastapi import Request
+
+from app.brain_address import resolve_brain_address
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
 from app.ui.db import _load_schema_current
-from app.ui.fleet import build_nodeviews, _render_advice_queue
+from app.ui.fleet import build_nodeviews, _render_advice_queue, _service_status_class, _service_status_label
 from app.ui.templates import _html_escape, render_shell
 
 
@@ -55,7 +59,39 @@ def _diagnostics_actions(hours: int, debug: bool) -> List[Dict[str, str]]:
     ]
 
 
-def render_diagnostics_page(hours: int, debug: bool) -> str:
+def _discovery_rows(request: Request) -> List[tuple[str, str, str]]:
+    info = resolve_brain_address(request)
+    host = (request.headers.get("host") or request.url.hostname or "").strip()
+    scheme = (request.url.scheme or "http").strip().lower()
+    reverse_proxy = "No"
+    if host:
+        try:
+            addr = ipaddress.ip_address(host.split(":", 1)[0])
+        except ValueError:
+            if scheme == "https":
+                reverse_proxy = "Likely"
+        else:
+            if addr.version == 4 and not addr.is_loopback and not addr.is_link_local and not addr.is_unspecified:
+                reverse_proxy = "No"
+
+    canonical = info.get("canonical_base_url") or "Not set"
+    recommended = info.get("recommended_lan_url") or "Not detected"
+    display = info.get("display_url") or "Could not determine"
+    warning = info.get("warning") or "None"
+    installer = "Ready" if info.get("display_url") else "Manual input required"
+
+    return [
+        ("Brain Address", "online", f"Other machines should use: {display}"),
+        ("Canonical address", "online" if info.get("canonical_base_url") else "warning", str(canonical)),
+        ("Recommended LAN", "online" if info.get("recommended_lan_url") else "warning", str(recommended)),
+        ("Discovery endpoint", "online", "Installers can query /discover or /.well-known/harry-brain."),
+        ("Reverse proxy", "info" if reverse_proxy == "Likely" else "online", reverse_proxy),
+        ("Installer discovery", "online" if info.get("display_url") else "warning", installer),
+        ("Warning", "warning" if info.get("warning") else "online", warning),
+    ]
+
+
+def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
     nodeviews = build_nodeviews(hours=hours)
 
     stale_n = sum(1 for n in nodeviews if n.stale)
@@ -97,6 +133,26 @@ def render_diagnostics_page(hours: int, debug: bool) -> str:
     )
 
     content = f"""
+<div class="section" id="discovery-diagnostics">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">Discovery diagnostics</div>
+      <div class="h2sub">How Harry Brain presents its address to installers and other machines.</div>
+    </div>
+  </div>
+
+  <div class="card compactcard">
+    <div class="advwrap">
+      {''.join(
+        f'<div class="advrow"><div class="advleft"><div class="advnode">{_html_escape(label)}</div><div class="advmsg">{_html_escape(text)}</div></div><span class="badgetxt {_service_status_class(status)}">{_html_escape(_service_status_label(status))}</span></div>'
+        for label, status, text in _discovery_rows(request)
+      )}
+    </div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
 <div class="section" id="diagnostic-summary">
   <div class="sectionhead">
     <div>

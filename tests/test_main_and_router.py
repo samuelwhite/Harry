@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 import app.config as config
+import app.brain_address as brain_address
 import app.main as main
 import importlib
 from app.ui import db as dbmod
@@ -149,6 +150,9 @@ def test_discover_endpoint_reports_brain_identity(monkeypatch, tmp_path):
     assert data["brain_version"] == "2026.05.09"
     assert data["agent_version"] == "0.2.5"
     assert data["schema_current"] == "0.2.3"
+    assert data["canonical_base_url"] == "http://brain.example:8789"
+    assert data["address_warning"] is None
+    assert data["address_source"] == "canonical"
     assert data["base_url"] == "http://brain.example:8789"
     assert data["ingest_url"] == "http://brain.example:8789/ingest"
     assert data["agent_download_url"] == "http://brain.example:8789/downloads/windows-agent-exe"
@@ -189,7 +193,7 @@ def test_downloads_prefers_non_local_public_base_url(monkeypatch, tmp_path):
 
 def test_downloads_uses_placeholder_env_only_as_fallback(monkeypatch, tmp_path):
     monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://<brain-ip>:8789")
-    monkeypatch.setattr(router, "_detect_lan_ip", lambda: "192.168.1.44")
+    monkeypatch.setattr(brain_address, "detect_lan_ip", lambda: "192.168.1.44")
     html = _render_downloads(monkeypatch, tmp_path)
 
     assert 'id="brain-url">http://192.168.1.44:8789<' in html
@@ -198,7 +202,7 @@ def test_downloads_uses_placeholder_env_only_as_fallback(monkeypatch, tmp_path):
 
 def test_downloads_ignores_container_bridge_public_base_url(monkeypatch, tmp_path):
     monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://172.17.0.2:8789")
-    monkeypatch.setattr(router, "_detect_lan_ip", lambda: "192.168.1.44")
+    monkeypatch.setattr(brain_address, "detect_lan_ip", lambda: "192.168.1.44")
     html = _render_downloads(monkeypatch, tmp_path)
 
     assert 'id="brain-url">http://192.168.1.44:8789<' in html
@@ -245,8 +249,7 @@ def test_downloads_removes_local_only_block(monkeypatch, tmp_path):
     monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://brain.example:8789")
     html = _render_downloads(monkeypatch, tmp_path)
 
-    assert "The installer will try to find Harry Brain automatically." in html
-    assert "If discovery fails, enter the LAN address of this machine." in html
+    assert "Other machines should use this address." in html
     assert "Advanced configuration" in html
     assert "http://127.0.0.1:8789" not in html
     assert "Docker/container networking" not in html
@@ -270,20 +273,20 @@ def test_downloads_ignores_container_bridge_request_host(monkeypatch):
     monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
     monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
     monkeypatch.delenv("HARRY_PORT", raising=False)
-    monkeypatch.setattr(router, "_detect_lan_ip", lambda: None)
+    monkeypatch.setattr(brain_address, "detect_lan_ip", lambda: None)
     request = _make_request("172.17.0.2:8787", scheme="http")
 
     public_url, local_url = router._resolve_brain_urls(request)
 
     assert public_url == "http://<brain-ip>:8789"
-    assert local_url == "http://127.0.0.1:8789"
+    assert local_url == "http://127.0.0.1:8787"
 
 
 def test_downloads_uses_detected_lan_ip_with_default_public_port(monkeypatch, tmp_path):
     monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
     monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
     monkeypatch.delenv("HARRY_PORT", raising=False)
-    monkeypatch.setattr(router, "_detect_lan_ip", lambda: "192.168.1.77")
+    monkeypatch.setattr(brain_address, "detect_lan_ip", lambda: "192.168.1.77")
     html = _render_downloads(monkeypatch, tmp_path)
 
     assert 'id="brain-url">http://192.168.1.77:8789<' in html
@@ -294,7 +297,7 @@ def test_downloads_domain_http_request_does_not_become_domain_port(monkeypatch):
     monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
     monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
     monkeypatch.delenv("HARRY_PORT", raising=False)
-    monkeypatch.setattr(router, "_detect_lan_ip", lambda: None)
+    monkeypatch.setattr(brain_address, "detect_lan_ip", lambda: None)
     request = _make_request("brain.example", scheme="http")
 
     public_url, _ = router._resolve_brain_urls(request)
@@ -325,8 +328,9 @@ def test_downloads_uses_placeholder_when_lan_ip_is_unavailable(monkeypatch, tmp_
     assert "http://192.168.1.100:8789" not in html
     assert "http://nas.local:8789" not in html
     assert "HARRY_PUBLIC_BASE_URL=http://&lt;your-brain-ip&gt;:8789" in html
-    assert "HARRY_BRAIN_LAN_IP=YOUR-BRAIN-IP" in html
-    assert "HARRY_PUBLIC_PORT=8789" in html
+    assert "YOUR-BRAIN-IP" in html
+    assert "HARRY_BRAIN_LAN_IP" in html
+    assert "HARRY_PUBLIC_PORT" in html
     assert "http://<brain-ip>:8789" not in html
     assert "127.0.0.1" not in html
     assert "Advanced configuration" in html
@@ -335,16 +339,36 @@ def test_downloads_uses_placeholder_when_lan_ip_is_unavailable(monkeypatch, tmp_
 def test_downloads_primary_guidance_is_short(monkeypatch, tmp_path):
     monkeypatch.setattr(
         router,
-        "_resolve_brain_urls",
-        lambda request: ("http://<brain-ip>:8789", "http://127.0.0.1:8789"),
+        "_resolve_brain_address_info",
+        lambda request: {
+            "display_url": None,
+            "warning": "Could not determine automatically.",
+            "public_port": 8789,
+            "local_url": "http://127.0.0.1:8789",
+        },
     )
-    monkeypatch.setattr(router, "_brain_url_warning", lambda url: "Could not determine automatically.")
     monkeypatch.setattr(router, "_downloads_dir", lambda: tmp_path)
     html = router.downloads_page(_make_starlette_request()).body.decode("utf-8")
 
-    assert "The installer will try to find Harry Brain automatically. If discovery fails, enter the LAN address of this machine." in html
+    assert "Could not determine automatically" in html
+    assert "Other machines should use this address." in html
     assert "Docker/container networking" not in html
     assert "reverse-proxy" not in html
+
+
+def test_discovery_diagnostics_section_shows_address_context(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://brain.example:8789")
+
+    with TestClient(main.app) as client:
+        resp = client.get("/diagnostics")
+
+    assert resp.status_code == 200
+    html = resp.text
+    assert "Discovery diagnostics" in html
+    assert "Brain Address" in html
+    assert "Canonical address" in html
+    assert "Recommended LAN" in html
 
 
 def test_api_page_lists_core_endpoints_and_examples():
