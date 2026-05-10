@@ -339,6 +339,20 @@ def _fmt_nic_brief(nics: List[Dict[str, Any]]) -> str:
     return "<br>".join(bits)
 
 
+def _render_network_interfaces_card(nics: List[Dict[str, Any]]) -> str:
+    if not nics:
+        return ""
+
+    return f"""
+  <div class="splitcols">
+    <div class="subcard" style="grid-column: 1 / -1;">
+      <div class="subcardtitle">Network interfaces</div>
+      <div class="subcardbody">{_fmt_nic_brief(nics)}</div>
+    </div>
+  </div>
+"""
+
+
 def render_inventory_page(hours: int, debug: bool) -> str:
     with _db() as conn:
         if not _db_has_ingest(conn):
@@ -419,13 +433,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
       <div class="subcardbody">{_fmt_gpu_brief(gpus, capabilities)}</div>
     </div>
   </div>
-
-  <div class="splitcols">
-    <div class="subcard" style="grid-column: 1 / -1;">
-      <div class="subcardtitle">Network interfaces</div>
-      <div class="subcardbody">{_fmt_nic_brief(nics)}</div>
-    </div>
-  </div>
+{_render_network_interfaces_card(nics)}
 </div>
 """
         )

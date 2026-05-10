@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from app.ui import inventory as inventory_ui
 
 
@@ -61,3 +63,65 @@ def test_inventory_row_preserves_complete_hardware_lists():
     assert len(row["disks"]) == 2
     assert len(row["gpus"]) == 2
     assert len(row["network_interfaces"]) == 1
+
+
+def test_inventory_page_hides_empty_network_interfaces(monkeypatch):
+    @contextmanager
+    def fake_db():
+        yield object()
+
+    latest = {
+        "node-1": {
+            "ts": "2026-05-10T12:00:00Z",
+            "payload": {
+                "facts": {
+                    "disks": [{"name": "Disk 1", "type": "NVMe", "size_gb": 512}],
+                    "gpus": [{"name": "NVIDIA RTX 3080", "mem_total_mb": 10240}],
+                },
+                "metrics": {"disk_used": [], "temps_c": {}, "gpu": [], "extensions": {}},
+                "derived": {"health": {"state": "healthy", "worst_severity": "ok", "reasons": []}, "extensions": {}},
+                "advice": [],
+            },
+        }
+    }
+
+    monkeypatch.setattr(inventory_ui, "_db", fake_db)
+    monkeypatch.setattr(inventory_ui, "_db_has_ingest", lambda conn: True)
+    monkeypatch.setattr(inventory_ui, "_fetch_latest_per_node", lambda conn: latest)
+
+    html = inventory_ui.render_inventory_page(hours=24, debug=False)
+
+    assert "Network interfaces" not in html
+    assert "Disk 1" in html
+    assert "NVIDIA RTX 3080" in html
+
+
+def test_inventory_page_renders_network_interfaces_when_present(monkeypatch):
+    @contextmanager
+    def fake_db():
+        yield object()
+
+    latest = {
+        "node-1": {
+            "ts": "2026-05-10T12:00:00Z",
+            "payload": {
+                "facts": {
+                    "network_interfaces": [
+                        {"name": "Ethernet", "ip": "192.168.1.10", "mac": "aa:bb:cc:dd:ee:ff", "speed_mbps": 1000}
+                    ]
+                },
+                "metrics": {"disk_used": [], "temps_c": {}, "gpu": [], "extensions": {}},
+                "derived": {"health": {"state": "healthy", "worst_severity": "ok", "reasons": []}, "advice": []},
+                "advice": [],
+            },
+        }
+    }
+
+    monkeypatch.setattr(inventory_ui, "_db", fake_db)
+    monkeypatch.setattr(inventory_ui, "_db_has_ingest", lambda conn: True)
+    monkeypatch.setattr(inventory_ui, "_fetch_latest_per_node", lambda conn: latest)
+
+    html = inventory_ui.render_inventory_page(hours=24, debug=False)
+
+    assert "Network interfaces" in html
+    assert "Ethernet" in html
