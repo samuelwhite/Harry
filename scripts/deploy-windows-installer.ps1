@@ -78,7 +78,7 @@ if (-not $scp) {
     throw "scp was not found. Install OpenSSH client or make scp available on PATH."
 }
 
-$remote = "$TargetUser@$TargetHost:$TargetPath"
+$remote = "${TargetUser}@${TargetHost}:$TargetPath"
 Write-Host "Copying Windows installer artifacts to $remote"
 & $scp.Source $InstallerExe $InstallerManifest $remote
 if ($LASTEXITCODE -ne 0) {
