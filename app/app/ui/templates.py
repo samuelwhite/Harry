@@ -1054,12 +1054,21 @@ table.inv {
   border-color: rgba(255,255,255,0.16);
 }
 
+.details > :not(summary) {
+  animation: disclosureOpen 0.18s ease;
+}
+
 .details summary:focus-visible {
   outline: 2px solid rgba(96,165,250,0.72);
   outline-offset: 2px;
 }
 
 .details summary::-webkit-details-marker { display:none; }
+
+@keyframes disclosureOpen {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 .details .detailsmuted {
   color: rgba(255,255,255,0.62);
@@ -1646,6 +1655,11 @@ def _render_top_nav(sidebar_sections: list[dict], active_page: str) -> str:
         if page == nav_page:
             cls += " active"
         links.append(f'<a class="{cls}" href="{href}">{_html_escape(_top_nav_label(section.get("label") or ""))}</a>')
+
+    api_cls = "topnav-link"
+    if nav_page == "api":
+        api_cls += " active"
+    links.append(f'<a class="{api_cls}" href="/api">API</a>')
 
     return "".join(links)
 

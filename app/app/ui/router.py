@@ -32,6 +32,7 @@ from app.ui.db import (
     unhide_node,
 )
 from app.ui.diagnostics import render_diagnostics_page
+from app.ui.api_docs import render_api_docs_page
 from app.ui.fleet import render_fleet_page
 from app.ui.inventory import _inventory_md, build_inventory_rows, render_inventory_page
 from app.ui.node import render_node_detail
@@ -592,7 +593,7 @@ def _brain_url_warning(url: str) -> str | None:
 def _downloads_fallback_help_html() -> str:
     return """
 <section class="section" id="downloads-warning">
-  <details class="card" style="padding:18px 20px;">
+  <details class="details card" style="padding:18px 20px;">
     <summary style="font-weight:700;">Need help finding the address?</summary>
     <div class="subtitle" style="margin-top:12px;">Installers will try to discover Harry Brain automatically.</div>
     <div class="subtitle" style="margin-top:10px;">Windows: run <code>ipconfig</code>.</div>
@@ -607,7 +608,7 @@ def _downloads_fallback_help_html() -> str:
 def _downloads_advanced_help_html() -> str:
     return """
 <section class="section" id="downloads-advanced">
-  <details class="card" style="padding:18px 20px;">
+  <details class="details card" style="padding:18px 20px;">
     <summary style="font-weight:700;">Advanced configuration</summary>
     <div class="subtitle" style="margin-top:12px;">Only use this if you want to set the address manually.</div>
     <div class="subtitle" style="margin-top:10px;"><code>HARRY_PUBLIC_BASE_URL=http://&lt;your-brain-ip&gt;:8789</code></div>
@@ -977,6 +978,11 @@ def diagnostics(request: Request) -> HTMLResponse:
 
     debug = (request.query_params.get("debug") or "").strip().lower() in ("1", "true", "yes", "y")
     return HTMLResponse(render_diagnostics_page(hours=hours, debug=debug))
+
+
+@router.get("/api", response_class=HTMLResponse)
+def api_docs(request: Request) -> HTMLResponse:
+    return HTMLResponse(render_api_docs_page())
 
 
 @router.post("/node/{node}/hide")

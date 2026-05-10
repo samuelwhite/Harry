@@ -345,3 +345,19 @@ def test_downloads_primary_guidance_is_short(monkeypatch, tmp_path):
     assert "The installer will try to find Harry Brain automatically. If discovery fails, enter the LAN address of this machine." in html
     assert "Docker/container networking" not in html
     assert "reverse-proxy" not in html
+
+
+def test_api_page_lists_core_endpoints_and_examples():
+    with TestClient(main.app) as client:
+        resp = client.get("/api")
+
+    assert resp.status_code == 200
+    html = resp.text
+    assert "/health" in html
+    assert "/discover" in html
+    assert "/ingest" in html
+    assert "/inventory.json" in html
+    assert "curl http://&lt;brain-ip&gt;:8789/health" in html
+    assert "Invoke-WebRequest http://&lt;brain-ip&gt;:8789/discover" in html
+    assert "import requests" in html
+    assert "Privacy Mode Enabled" not in html
