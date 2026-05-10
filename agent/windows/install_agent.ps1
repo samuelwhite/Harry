@@ -366,10 +366,12 @@ $UpdaterScript = Join-Path $InstallRoot "update_agent.ps1"
 $WrapperLog = Join-Path $InstallRoot "HarryAgentService.wrapper.log"
 $OutLog = Join-Path $InstallRoot "HarryAgentService.out.log"
 $ErrLog = Join-Path $InstallRoot "HarryAgentService.err.log"
+$HadExistingInstall = (Test-Path $AgentExe) -or (Test-Path $ServiceExe) -or (Test-Path $ServiceXml) -or (Test-Path $ConfigPath)
 
 Write-Host ""
 Write-Host "Installing Harry Agent to $InstallRoot ..."
 Write-Host "Installer source folder: $scriptDir"
+Write-Host ("Existing install detected: {0}" -f ($(if ($HadExistingInstall) { "yes" } else { "no" })))
 Write-Host ""
 
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
@@ -410,134 +412,135 @@ if (Test-Path ".\update_agent.ps1") {
     exit 1
 }
 
-if (-not (Test-Path $ConfigPath)) {
-    Write-Host ""
-    Write-Host "Enter the Harry Brain address."
-    Write-Host "This is the full address of the machine running Harry Brain."
-    Write-Host "Examples:"
-    Write-Host "  192.168.1.100"
-    Write-Host "  192.168.1.100:8789"
-    Write-Host "  http://192.168.1.100:8789"
-    Write-Host ""
+Write-Host ""
+Write-Host "Enter the Harry Brain address."
+Write-Host "This is the full address of the machine running Harry Brain."
+Write-Host "Examples:"
+Write-Host "  192.168.1.100"
+Write-Host "  192.168.1.100:8789"
+Write-Host "  http://192.168.1.100:8789"
+Write-Host ""
 
-    $brain = $null
-    if (-not [string]::IsNullOrWhiteSpace($env:HARRY_PUBLIC_BASE_URL)) {
-        try {
-            $brain = Normalize-BrainUrl $env:HARRY_PUBLIC_BASE_URL
-            Write-Host "Using HARRY_PUBLIC_BASE_URL: $brain"
-        } catch {
-            Write-Host ""
-            Write-Host "ERROR: HARRY_PUBLIC_BASE_URL is invalid." -ForegroundColor Red
-            Read-Host "Press Enter to exit"
-            exit 1
-        }
-    } else {
-        $publicPort = Get-DefaultBrainPort
-        $discovered = Discover-HarryBrain -Port $publicPort
-
-        if ($discovered.Count -eq 1) {
-            $brain = $discovered[0]
-            Write-Host "Auto-discovered Harry Brain: $brain"
-        } elseif ($discovered.Count -gt 1) {
-            if (-not (Test-IsAdmin)) {
-                Write-Host "Multiple Harry Brain instances were discovered, but the installer cannot prompt here." -ForegroundColor Yellow
-            }
-
-            Write-Host ""
-            Write-Host "Multiple Harry Brain instances were discovered:"
-            for ($i = 0; $i -lt $discovered.Count; $i++) {
-                Write-Host ("  {0}) {1}" -f ($i + 1), $discovered[$i])
-            }
-            Write-Host "  m) Enter a Brain address manually"
-            $choice = Read-Host "Choose a Brain [1]"
-            if ([string]::IsNullOrWhiteSpace($choice)) {
-                $choice = "1"
-            }
-
-            if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $discovered.Count) {
-                $brain = $discovered[[int]$choice - 1]
-            }
-        }
-    }
-
-    if (-not $brain) {
-        if (-not [Console]::IsInputRedirected) {
-            Write-Host ""
-            Write-Host "No Brain was auto-discovered."
-            Write-Host "Enter the Brain address that other machines can reach."
-            Write-Host "Examples:"
-            Write-Host "  192.168.1.100"
-            Write-Host "  192.168.1.100:8789"
-            Write-Host "  http://192.168.1.100:8789"
-            Write-Host ""
-            $brainInput = Read-Host "Harry Brain address"
-
-            if ([string]::IsNullOrWhiteSpace($brainInput)) {
-                Write-Host "ERROR: No Brain address provided." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
-                exit 1
-            }
-
-            try {
-                $brain = Normalize-BrainUrl $brainInput
-            } catch {
-                Write-Host ""
-                Write-Host "ERROR: Invalid Harry Brain address: $brainInput" -ForegroundColor Red
-                Write-Host ""
-                Read-Host "Press Enter to exit"
-                exit 1
-            }
-        } else {
-            Write-Host ""
-            Write-Host "ERROR: Harry Brain could not be auto-discovered in non-interactive mode." -ForegroundColor Red
-            Write-Host "Set the Brain address manually and rerun the installer." -ForegroundColor Yellow
-            exit 1
-        }
-    } else {
-        try {
-            $brain = Normalize-BrainUrl $brain
-        } catch {
-            Write-Host ""
-            Write-Host "ERROR: Invalid discovered Harry Brain address: $brain" -ForegroundColor Red
-            Write-Host ""
-            Read-Host "Press Enter to exit"
-            exit 1
-        }
-    }
-
+$brain = $null
+if (-not [string]::IsNullOrWhiteSpace($env:HARRY_PUBLIC_BASE_URL)) {
     try {
-        $verified = Test-BrainDiscoveryCandidate -BrainUrl $brain
-        if (-not $verified) {
-            throw "Harry Brain did not advertise discovery metadata at $brain"
-        }
-        $brain = $verified
+        $brain = Normalize-BrainUrl $env:HARRY_PUBLIC_BASE_URL
+        Write-Host "Using HARRY_PUBLIC_BASE_URL: $brain"
     } catch {
         Write-Host ""
-        Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "ERROR: HARRY_PUBLIC_BASE_URL is invalid." -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
+} else {
+    $publicPort = Get-DefaultBrainPort
+    $discovered = Discover-HarryBrain -Port $publicPort
+
+    if ($discovered.Count -eq 1) {
+        $brain = $discovered[0]
+        Write-Host "Auto-discovered Harry Brain: $brain"
+    } elseif ($discovered.Count -gt 1) {
+        if (-not (Test-IsAdmin)) {
+            Write-Host "Multiple Harry Brain instances were discovered, but the installer cannot prompt here." -ForegroundColor Yellow
+        }
+
+        Write-Host ""
+        Write-Host "Multiple Harry Brain instances were discovered:"
+        for ($i = 0; $i -lt $discovered.Count; $i++) {
+            Write-Host ("  {0}) {1}" -f ($i + 1), $discovered[$i])
+        }
+        Write-Host "  m) Enter a Brain address manually"
+        $choice = Read-Host "Choose a Brain [1]"
+        if ([string]::IsNullOrWhiteSpace($choice)) {
+            $choice = "1"
+        }
+
+        if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $discovered.Count) {
+            $brain = $discovered[[int]$choice - 1]
+        }
+    }
+}
+
+if (-not $brain) {
+    if (-not [Console]::IsInputRedirected) {
+        Write-Host ""
+        Write-Host "No Brain was auto-discovered."
+        Write-Host "Enter the Brain address that other machines can reach."
+        Write-Host "Examples:"
+        Write-Host "  192.168.1.100"
+        Write-Host "  192.168.1.100:8789"
+        Write-Host "  http://192.168.1.100:8789"
+        Write-Host ""
+        $brainInput = Read-Host "Harry Brain address"
+
+        if ([string]::IsNullOrWhiteSpace($brainInput)) {
+            Write-Host "ERROR: No Brain address provided." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }
+
+        try {
+            $brain = Normalize-BrainUrl $brainInput
+        } catch {
+            Write-Host ""
+            Write-Host "ERROR: Invalid Harry Brain address: $brainInput" -ForegroundColor Red
+            Write-Host ""
+            Read-Host "Press Enter to exit"
+            exit 1
+        }
+    } else {
+        Write-Host ""
+        Write-Host "ERROR: Harry Brain could not be auto-discovered in non-interactive mode." -ForegroundColor Red
+        Write-Host "Set the Brain address manually and rerun the installer." -ForegroundColor Yellow
+        exit 1
+    }
+} else {
+    try {
+        $brain = Normalize-BrainUrl $brain
+    } catch {
+        Write-Host ""
+        Write-Host "ERROR: Invalid discovered Harry Brain address: $brain" -ForegroundColor Red
         Write-Host ""
         Read-Host "Press Enter to exit"
         exit 1
     }
+}
 
-    @{ public_base_url = $brain; brain_url = $brain } |
-        ConvertTo-Json |
-        Set-Content -Encoding UTF8 $ConfigPath
+try {
+    $verified = Test-BrainDiscoveryCandidate -BrainUrl $brain
+    if (-not $verified) {
+        throw "Harry Brain did not advertise discovery metadata at $brain"
+    }
+    $brain = $verified
+} catch {
+    Write-Host ""
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host ""
+    Read-Host "Press Enter to exit"
+    exit 1
+}
 
-    Write-Host ""
-    Write-Host "Saved config to $ConfigPath"
-    Write-Host "Brain URL: $brain"
-} else {
-    Write-Host ""
-    Write-Host "Existing config found at $ConfigPath"
+$config = @{}
+if (Test-Path $ConfigPath) {
     try {
         $existingConfig = Get-Content $ConfigPath -Raw | ConvertFrom-Json
-        if ($existingConfig.brain_url) {
-            Write-Host "Brain URL: $($existingConfig.brain_url)"
+        if ($existingConfig) {
+            foreach ($prop in $existingConfig.PSObject.Properties) {
+                $config[$prop.Name] = $prop.Value
+            }
         }
     } catch {
-        Write-Host "Could not read existing config."
+        Write-Host "Could not read existing config; rewriting Brain URL settings." -ForegroundColor Yellow
     }
 }
+
+$config.public_base_url = $brain
+$config.brain_url = $brain
+$config | ConvertTo-Json | Set-Content -Encoding UTF8 $ConfigPath
+
+Write-Host ""
+Write-Host "Saved config to $ConfigPath"
+Write-Host "Brain URL: $brain"
 
 Write-Host ""
 Write-Host "Refreshing Harry Agent service..."
@@ -563,6 +566,17 @@ Write-Host "Starting Harry Agent service..."
 
 Write-Host ""
 Write-Host "Harry Agent installed successfully."
+Write-Host "Upgraded existing install: $([bool]$HadExistingInstall)"
+try {
+    $installedVersion = (& $AgentExe --version 2>$null | Select-Object -First 1).Trim()
+    if ($installedVersion) {
+        Write-Host "Installed agent version: $installedVersion"
+    }
+} catch {
+    Write-Host "Installed agent version: unknown"
+}
+Write-Host "Installed agent path: $AgentExe"
+Write-Host "Configured Brain URL: $brain"
 Write-Host "Files:   $InstallRoot"
 Write-Host "Config:  $ConfigPath"
 Write-Host "Logs:"

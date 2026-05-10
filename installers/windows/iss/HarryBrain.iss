@@ -1,7 +1,7 @@
 [Setup]
 AppId={{D6A6C8B8-9B41-4E7E-9D95-6A0F4C4E1B11}
 AppName=Harry Brain
-AppVersion=2026.03.18
+AppVersion=2026.05.09
 DefaultDirName={commonpf}\Harry\brain
 DefaultGroupName=Harry
 OutputBaseFilename=HarryBrainSetup

@@ -28,3 +28,13 @@ def test_windows_installer_examples_are_public_and_generic():
         assert "harry-brain:8787" not in text
         assert "White" + " Family" not in text
         assert "harry." + "white" + "familyhome.net" not in text
+
+
+def test_windows_brain_payload_has_current_agent_version():
+    payload_script = Path("installers/windows/brain-payload/_internal/dist/harry_agent.sh").read_text(encoding="utf-8")
+    setup_iss = Path("installers/windows/iss/HarryBrain.iss").read_text(encoding="utf-8")
+
+    assert 'AGENT_VERSION="0.2.5"' in payload_script
+    assert 'AGENT_VERSION="0.2.3"' not in payload_script
+    assert "BRAIN_VERSION=\"2026.05.09\"" in payload_script
+    assert "AppVersion=2026.05.09" in setup_iss

@@ -5,9 +5,9 @@ set -euo pipefail
 # Harry Agent (self-updating, robust)
 # -----------------------------------------------------------------------------
 
-AGENT_VERSION="0.2.3"
+AGENT_VERSION="0.2.5"
 SCHEMA_VERSION="0.2.3"
-BRAIN_VERSION="2026.03.15"
+BRAIN_VERSION="2026.05.09"
 
 CURL="${CURL:-/usr/bin/curl}"
 PYTHON="${PYTHON:-python3}"

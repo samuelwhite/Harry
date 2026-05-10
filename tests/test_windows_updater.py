@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import importlib.util
 import sys
 import types
@@ -67,3 +68,47 @@ def test_windows_updater_skips_when_brain_is_not_newer(monkeypatch, tmp_path):
 
     assert win_agent.maybe_self_update() is False
     assert calls == []
+
+
+def test_windows_agent_version_flag_prints_version(monkeypatch, capsys):
+    win_agent = _load_windows_agent(monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["harry_agent.py", "--version"])
+
+    win_agent.main()
+
+    out = capsys.readouterr().out.strip()
+    assert out == "0.2.5"
+
+
+def test_windows_agent_diagnostics_flag_prints_summary(monkeypatch, capsys):
+    win_agent = _load_windows_agent(monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["harry_agent.py", "--diagnostics"])
+    monkeypatch.setattr(
+        win_agent,
+        "_fetch_brain_discovery",
+        lambda: {
+            "ok": True,
+            "service": "harry-brain",
+            "agent_version": "0.2.5",
+            "canonical_base_url": "http://brain.example:8789",
+            "recommended_lan_url": "http://192.168.1.10:8789",
+        },
+    )
+    monkeypatch.setattr(
+        win_agent,
+        "build_payload",
+        lambda: {
+            "node": "workstation-1",
+            "ts": "2026-05-10T12:00:00Z",
+            "facts": {"gpus": [{"name": "Intel Iris Xe"}]},
+        },
+    )
+
+    win_agent.main()
+
+    out = capsys.readouterr().out.strip()
+    data = json.loads(out)
+    assert data["agent_version"] == "0.2.5"
+    assert data["discovery_ok"] is True
+    assert data["gpu_count"] == 1
+    assert data["payload_node"] == "workstation-1"

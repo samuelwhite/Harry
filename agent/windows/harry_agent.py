@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import re
@@ -643,7 +644,47 @@ def send(payload: dict) -> None:
         print(f"Failed to send: {e}")
 
 
+def build_diagnostics_summary() -> dict:
+    discovery = _fetch_brain_discovery() or {}
+    payload = build_payload()
+    gpus = payload.get("facts", {}).get("gpus")
+    if not isinstance(gpus, list):
+        gpus = []
+
+    return {
+        "agent_version": AGENT_VERSION,
+        "brain_url": BRAIN_URL,
+        "endpoint": ENDPOINT,
+        "discovery_ok": bool(discovery.get("ok")),
+        "discovery_service": discovery.get("service"),
+        "discovery_agent_version": discovery.get("agent_version"),
+        "discovery_canonical_base_url": discovery.get("canonical_base_url"),
+        "discovery_recommended_lan_url": discovery.get("recommended_lan_url"),
+        "gpu_count": len(gpus),
+        "payload_node": payload.get("node"),
+        "payload_last_seen": payload.get("ts"),
+        "ingest_url": ENDPOINT,
+    }
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(add_help=True)
+    parser.add_argument("--version", action="store_true", help="Print the agent version and exit.")
+    parser.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="Print a local diagnostics summary and exit without sending telemetry.",
+    )
+    args = parser.parse_args()
+
+    if args.version:
+        print(AGENT_VERSION)
+        return
+
+    if args.diagnostics:
+        print(json.dumps(build_diagnostics_summary(), indent=2, sort_keys=True))
+        return
+
     print("Harry Windows Agent starting")
     print("Brain:", BRAIN_URL)
     print("Endpoint:", ENDPOINT)
