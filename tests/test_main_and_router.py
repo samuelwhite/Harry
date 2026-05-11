@@ -306,14 +306,18 @@ def test_downloads_rejects_detected_link_local_ip(monkeypatch, tmp_path):
 
 def test_downloads_removes_local_only_block(monkeypatch, tmp_path):
     monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://brain.example:8789")
+    (tmp_path / "HarryAgentSetup.exe").write_bytes(b"MZ")
     html = _render_downloads(monkeypatch, tmp_path)
 
     assert "Recommended Windows installer" not in html
-    assert "Windows installer" in html
+    assert "Windows installer" not in html
     assert "HarryAgentSetup.exe" in html
+    assert html.count("HarryAgentSetup.exe") == 1
+    assert "/downloads/windows-agent" in html
+    assert "/downloads/windows-agent-exe" not in html
+    assert "Download Windows installer" not in html
     assert "Other machines should use this address." in html
     assert "Advanced configuration" in html
-    assert "windows-agent-script" not in html
     assert "http://127.0.0.1:8789" not in html
     assert "Docker/container networking" not in html
     assert "reverse proxy" not in html

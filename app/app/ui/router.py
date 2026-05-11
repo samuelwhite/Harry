@@ -688,20 +688,6 @@ def downloads_page(request: Request) -> HTMLResponse:
 
     warning_html = _downloads_fallback_help_html() if (warning or needs_guidance) else ""
     advanced_html = _downloads_advanced_help_html()
-    windows_installer_html = """
-<section class="section" id="downloads-windows-installer">
-  <div class="card">
-    <div class="k">Windows installer</div>
-    <div class="v big"><code>HarryAgentSetup.exe</code></div>
-    <div class="subtitle">Current setup EXE built from the latest source. It installs Harry Agent and sets up discovery automatically.</div>
-    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px;">
-      <a class="btn" href="/downloads/windows-agent">Download Windows installer</a>
-      <code>HarryAgentSetup.exe</code>
-    </div>
-  </div>
-</section>
-"""
-
     content = f"""
     {warning_html}
 
@@ -719,8 +705,6 @@ def downloads_page(request: Request) -> HTMLResponse:
     {"<div class=\"subtitle\" style=\"margin-top:8px; color:rgba(251,191,36,0.95);\">"+html.escape(warning_note)+"</div>" if warning_note else ""}
   </div>
 </section>
-
-{windows_installer_html}
 
 <section class="section" id="downloads-files">
   <div class="sectionhead">
