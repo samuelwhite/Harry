@@ -31,6 +31,8 @@ installers/output
 # ----------------------------
 installers/windows/build/
 downloads/*.exe
+!downloads/HarryAgentSetup.exe
+!downloads/HarryAgentSetup.manifest.json
 installers/windows/iss/Output/*.exe
 
 installers/windows/brain-payload/*.exe

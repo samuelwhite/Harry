@@ -1,0 +1,9 @@
+{
+  "installer_name": "HarryAgentSetup.exe",
+  "brain_version": "2026.05.09",
+  "agent_version": "0.2.5",
+  "schema_current": "0.2.3",
+  "source_iss_sha256": "F0700384FFC4FE8015DA2208026F2F92171D2A0A49FD3A8F84A60E4E86C161C7",
+  "agent_binary_sha256": "A485EC73165B12723AC09953EBDBF707BCCA394A4E61420894C7063DC961360E",
+  "built_utc": "2026-05-11T08:38:51.6515705Z"
+}

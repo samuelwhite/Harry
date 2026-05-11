@@ -63,7 +63,9 @@ To verify the installer path:
 
 The installer should reflect Brain `2026.05.09`, Agent `0.2.5`, and Schema `0.2.3`.
 
-For a one-command build-and-deploy flow:
+Harry’s stable Windows installer artifacts are committed in `downloads/`, so a normal `git pull` or `update-harry` refreshes them with the repo.
+
+For an optional manual build-and-copy flow:
 
 `pwsh -File scripts/release-windows-installer.ps1 -TargetHost <brain-host> -TargetUser <ssh-user>`
 
@@ -82,6 +84,7 @@ Notes:
 `HarryAgentSetup.exe` is generated, not committed.
 The manifest prevents stale installers from being served silently.
 The build step requires Inno Setup 6 and `ISCC.exe` on PATH or installed in the default location.
+The deploy helper is optional for manual copies, not required for normal updates.
 
 ---
 

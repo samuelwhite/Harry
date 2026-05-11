@@ -54,7 +54,14 @@ def test_windows_installer_iss_sources_current_runtime_artifacts():
 
 def test_windows_installer_manifest_is_expected_runtime_name():
     router = Path("app/app/ui/router.py").read_text(encoding="utf-8")
+    gitignore = Path(".gitignore").read_text(encoding="utf-8")
+    readme = Path("README.md").read_text(encoding="utf-8")
 
     assert "HarryAgentSetup.manifest.json" in router
     assert "Windows agent installer is stale or missing its manifest" in router
     assert "Run scripts/build-windows-installer.ps1" in router or "build-windows-installer.ps1" in router
+    assert "!downloads/HarryAgentSetup.exe" in gitignore
+    assert "!downloads/HarryAgentSetup.manifest.json" in gitignore
+    assert "committed in `downloads/`" in readme
+    assert "normal `git pull` or `update-harry` refreshes them" in readme
+    assert "optional manual build-and-copy flow" in readme
