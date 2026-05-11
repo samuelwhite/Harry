@@ -69,7 +69,7 @@ For an optional manual build-and-copy flow:
 
 `pwsh -File scripts/release-windows-installer.ps1 -TargetHost <brain-host> -TargetUser <ssh-user>`
 
-For manual copy:
+For optional manual copy:
 
 `scp downloads\HarryAgentSetup.exe <ssh-user>@<brain-host>:/opt/harry/downloads/`
 `scp downloads\HarryAgentSetup.manifest.json <ssh-user>@<brain-host>:/opt/harry/downloads/`
@@ -81,7 +81,7 @@ On the Brain, verify the artifact and served download:
 
 Notes:
 
-`HarryAgentSetup.exe` is generated, not committed.
+`HarryAgentSetup.exe` is generated, but committed here as the latest stable artifact.
 The manifest prevents stale installers from being served silently.
 The build step requires Inno Setup 6 and `ISCC.exe` on PATH or installed in the default location.
 The deploy helper is optional for manual copies, not required for normal updates.

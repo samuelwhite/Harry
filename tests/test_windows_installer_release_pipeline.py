@@ -64,4 +64,5 @@ def test_windows_installer_manifest_is_expected_runtime_name():
     assert "!downloads/HarryAgentSetup.manifest.json" in gitignore
     assert "committed in `downloads/`" in readme
     assert "normal `git pull` or `update-harry` refreshes them" in readme
+    assert "generated, but committed here as the latest stable artifact" in readme
     assert "optional manual build-and-copy flow" in readme
