@@ -30,9 +30,6 @@ Name: "{app}"
 Filename: "{app}\HarryAgentService.exe"; Parameters: "stop"; Flags: runhidden skipifdoesntexist
 Filename: "{app}\HarryAgentService.exe"; Parameters: "uninstall"; Flags: runhidden skipifdoesntexist
 
-[Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install_agent.ps1"""; Flags: waituntilterminated; StatusMsg: "Searching for Harry Brain and finalising setup..."
-
 [Code]
 const
   HarryAgentServiceName = 'HarryAgent';
@@ -43,6 +40,34 @@ var
   ResultCode: Integer;
 begin
   Result := Exec(FileName, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+function RunInstallAgentScript: Boolean;
+var
+  ResultCode: Integer;
+  Params: string;
+begin
+  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\install_agent.ps1') + '"';
+  Result := Exec(
+    ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    Params,
+    '',
+    SW_SHOWNORMAL,
+    ewWaitUntilTerminated,
+    ResultCode
+  ) and (ResultCode = 0);
+
+  if not Result then
+  begin
+    MsgBox(
+      'Harry Agent setup failed. The installer script did not complete successfully.' + #13#10 +
+      'Exit code: ' + IntToStr(ResultCode) + #13#10#13#10 +
+      'Please check C:\ProgramData\Harry\logs\HarryAgent.install.log for details.',
+      mbError,
+      MB_OK
+    );
+    Abort;
+  end;
 end;
 
 function IsHarryAgentServiceRunning: Boolean;
@@ -105,4 +130,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
     StopHarryAgentServiceForUpgrade();
+
+  if CurStep = ssPostInstall then
+    RunInstallAgentScript();
 end;

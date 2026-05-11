@@ -28,10 +28,13 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "ERROR: No Brain address provided." in text
         assert "brain_auto_discovery_failed_noninteractive" in text
         assert "Stop-HarryAgentService" in text
+        assert "Invoke-TaskKillBestEffort" in text
         assert "Wait-HarryAgentServiceProcessExit" in text
         assert "Wait-HarryAgentServiceProcessStart" in text
+        assert "Test-HarryAgentServiceRunning" in text
         assert "Start-HarryAgentService" in text
         assert "Run-AgentOnce" in text
+        assert "Test-InstalledAgentState" in text
         assert "taskkill.exe" in text
         assert "sc.exe" in text
         assert 'query "HarryAgent"' in text or "query $ServiceName" in text
@@ -42,6 +45,10 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "config.ingest_url = \"$brain/ingest\"" in text
         assert "config.agent_version = $agentVersion" in text
         assert "Starting Harry Agent service..." in text
+        assert "install_validation_success" in text
+        assert "Start-Transcript" in text
+        assert "Stop-Transcript" in text
+        assert "Press Enter to exit" in text
 
 
 def test_windows_installer_examples_are_public_and_generic():
@@ -67,7 +74,10 @@ def test_windows_agent_installer_sources_runtime_agent_package():
     assert "CurStepChanged" in agent_iss
     assert "StopHarryAgentServiceForUpgrade" in agent_iss
     assert "HarryAgentService.exe" in agent_iss
-    assert "Flags: waituntilterminated" in agent_iss
+    assert "RunInstallAgentScript" in agent_iss
+    assert "ssPostInstall" in agent_iss
+    assert "ResultCode" in agent_iss
+    assert "Exec(" in agent_iss
 
     assert "install_agent.ps1" in brain_iss
     assert "HarryAgentSetup.exe" not in brain_iss
@@ -106,3 +116,16 @@ def test_windows_installer_logs_are_documented():
     assert "Configured Brain URL:" in diagnose
     assert "Service status:" in diagnose
     assert "Health / discovery test:" in diagnose
+
+
+def test_windows_installer_error_handling_and_exit_codes_are_explicit():
+    script = Path("agent/windows/install_agent.ps1").read_text(encoding="utf-8")
+    iss = Path("installers/windows/iss/HarryAgent.iss").read_text(encoding="utf-8")
+
+    assert "taskkill_process_absent" in script
+    assert "Post-install validation failed" in script
+    assert "exit 1" in script
+    assert "ExitCode" in script or "ResultCode" in iss
+    assert "CurStepChanged" in iss
+    assert "ssPostInstall" in iss
+    assert "Harry Agent installer failed" in iss or "failed" in iss.lower()

@@ -24,6 +24,7 @@ def test_windows_installer_release_script_describes_current_pipeline():
     assert "Brain version:" in script
     assert "Agent version:" in script
     assert "Schema version:" in script
+    assert "Start-Transcript" in Path("agent/windows/install_agent.ps1").read_text(encoding="utf-8")
 
     assert "TargetHost" in deploy
     assert "TargetPath" in deploy
@@ -50,6 +51,9 @@ def test_windows_installer_iss_sources_current_runtime_artifacts():
     assert f'MyAppVersion "{BRAIN_VERSION}"' in iss
     assert "..\\..\\..\\app\\dist\\windows\\*" in iss
     assert "install_agent.ps1" in iss
+    assert "ssPostInstall" in iss
+    assert "ResultCode" in iss
+    assert "Exec(" in iss
 
 
 def test_windows_installer_manifest_is_expected_runtime_name():

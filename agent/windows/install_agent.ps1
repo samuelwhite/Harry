@@ -81,6 +81,46 @@ function Invoke-ServiceCommand {
     }
 }
 
+function Invoke-TaskKillBestEffort {
+    param(
+        [string]$ImageName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ImageName)) {
+        return $false
+    }
+
+    $output = $null
+    try {
+        $output = & (Join-Path $env:SystemRoot "System32\taskkill.exe") /F /T /IM $ImageName 2>&1
+    } catch {
+        $output = @($_.Exception.Message)
+    }
+
+    $text = @($output) -join "`n"
+    if ($text) {
+        $text | Out-Host
+        foreach ($line in @($output)) {
+            if ($line) {
+                Write-InstallLog ("taskkill {0}" -f $line)
+            }
+        }
+    }
+
+    if ($text -match 'not found' -or $text -match 'No running instance') {
+        Write-InstallLog "taskkill_process_absent image=$ImageName"
+        return $false
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-InstallLog "taskkill_exit_code=$LASTEXITCODE image=$ImageName"
+    } else {
+        Write-InstallLog "taskkill_requested image=$ImageName"
+    }
+
+    return $true
+}
+
 function Get-HarryAgentServiceState {
     try {
         $result = & (Join-Path $env:SystemRoot "System32\sc.exe") query "HarryAgent" 2>&1
@@ -112,6 +152,11 @@ function Test-HarryAgentServiceRegistered {
     return -not [string]::IsNullOrWhiteSpace($state)
 }
 
+function Test-HarryAgentServiceRunning {
+    $state = Get-HarryAgentServiceState
+    return $state -eq "RUNNING" -or $state -eq "START_PENDING" -or $state -eq "STOP_PENDING"
+}
+
 function Wait-HarryAgentServiceProcessExit {
     param(
         [int]$TimeoutSeconds = 20
@@ -119,13 +164,13 @@ function Wait-HarryAgentServiceProcessExit {
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        if (-not (Test-HarryAgentServiceRegistered)) {
+        if (-not (Test-HarryAgentServiceRunning)) {
             return $true
         }
         Start-Sleep -Milliseconds 500
     }
 
-    return -not (Test-HarryAgentServiceRegistered)
+    return -not (Test-HarryAgentServiceRunning)
 }
 
 function Wait-HarryAgentServiceProcessStart {
@@ -158,11 +203,7 @@ function Stop-HarryAgentService {
 
     if (-not (Wait-HarryAgentServiceProcessExit -TimeoutSeconds 20)) {
         Write-Host "Service is still running; trying taskkill fallback..." -ForegroundColor Yellow
-        try {
-            & (Join-Path $env:SystemRoot "System32\taskkill.exe") /F /T /IM "HarryAgentService.exe" | Out-Host
-        } catch {
-            Write-Host "taskkill fallback failed: $($_.Exception.Message)" -ForegroundColor Yellow
-        }
+        [void](Invoke-TaskKillBestEffort -ImageName "HarryAgentService.exe")
         if (-not (Wait-HarryAgentServiceProcessExit -TimeoutSeconds 10)) {
             throw "Harry Agent service is still running after stop attempts."
         }
@@ -512,6 +553,7 @@ $WrapperLog = Join-Path $InstallRoot "HarryAgentService.wrapper.log"
 $OutLog = Join-Path $InstallRoot "HarryAgentService.out.log"
 $ErrLog = Join-Path $InstallRoot "HarryAgentService.err.log"
 $HadExistingInstall = (Test-Path $AgentExe) -or (Test-Path $ServiceExe) -or (Test-Path $ServiceXml) -or (Test-Path $ConfigPath)
+$TranscriptStarted = $false
 
 function Write-InstallLog {
     param([string]$Message)
@@ -546,6 +588,56 @@ function Run-AgentOnce {
     Write-InstallLog "agent_once_success exit_code=$exitCode"
 }
 
+function Test-InstalledAgentState {
+    param(
+        [string]$ConfiguredBrainUrl,
+        [string]$ExpectedAgentVersion
+    )
+
+    $issues = New-Object System.Collections.Generic.List[string]
+
+    if (-not (Test-Path $ConfigPath)) {
+        $issues.Add("agent_config.json is missing")
+    } else {
+        try {
+            $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+            if (-not $config.public_base_url) { $issues.Add("configured Brain URL is empty") }
+            if (-not $config.brain_url) { $issues.Add("brain_url is empty") }
+            if (-not $config.ingest_url) { $issues.Add("ingest_url is empty") }
+            if (-not $config.agent_version) { $issues.Add("agent_version is empty") }
+        } catch {
+            $issues.Add("agent_config.json could not be parsed")
+        }
+    }
+
+    if (-not (Test-Path $AgentExe)) {
+        $issues.Add("harry_agent.exe is missing")
+    }
+
+    if (-not (Test-HarryAgentServiceRegistered)) {
+        $issues.Add("HarryAgent service is not registered")
+    }
+
+    if (-not (Test-HarryAgentServiceRunning)) {
+        $issues.Add("HarryAgent service is not running")
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ConfiguredBrainUrl)) {
+        $issues.Add("Brain URL is empty")
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ExpectedAgentVersion)) {
+        $issues.Add("agent version could not be read")
+    }
+
+    if ($issues.Count -gt 0) {
+        Write-InstallLog ("install_validation_failed issues={0}" -f ($issues -join "; "))
+        throw "Post-install validation failed: $($issues -join '; ')"
+    }
+
+    Write-InstallLog "install_validation_success"
+}
+
 Write-Host ""
 Write-Host "Installing Harry Agent to $InstallRoot ..."
 Write-Host "Installer source folder: $scriptDir"
@@ -557,6 +649,14 @@ Write-Host ""
 
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
+try {
+    Start-Transcript -Path $InstallLog -Append | Out-Null
+    $TranscriptStarted = $true
+} catch {
+    Write-Host "Transcript logging could not be started: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-InstallLog "transcript_unavailable error=$($_.Exception.Message)"
+}
 
 if ($HadExistingInstall) {
     Stop-HarryAgentService
@@ -837,4 +937,21 @@ Write-Host ""
 Write-Host "To watch the main log live in PowerShell, run:"
 Write-Host "  Get-Content `"$OutLog`" -Wait"
 Write-Host ""
+try {
+    Test-InstalledAgentState -ConfiguredBrainUrl $brain -ExpectedAgentVersion $agentVersion
+} catch {
+    Write-Host ""
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    Write-InstallLog "post_install_validation_failed error=$($_.Exception.Message)"
+    if ($TranscriptStarted) {
+        try { Stop-Transcript | Out-Null } catch { }
+    }
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+if ($TranscriptStarted) {
+    try { Stop-Transcript | Out-Null } catch { }
+}
+
 Read-Host "Press Enter to exit"
