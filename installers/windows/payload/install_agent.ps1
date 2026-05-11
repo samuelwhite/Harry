@@ -81,12 +81,35 @@ function Invoke-ServiceCommand {
     }
 }
 
-function Test-HarryAgentServiceProcessRunning {
+function Get-HarryAgentServiceState {
     try {
-        return [bool](Get-Process -Name "HarryAgentService" -ErrorAction SilentlyContinue)
+        $result = & (Join-Path $env:SystemRoot "System32\sc.exe") query "HarryAgent" 2>&1
+        foreach ($line in @($result)) {
+            if ($line -match 'STATE\s*:\s*\d+\s+(\w+)') {
+                return $Matches[1].ToUpperInvariant()
+            }
+        }
     } catch {
-        return $false
     }
+
+    if (Test-Path $ServiceExe) {
+        try {
+            $result = & $ServiceExe status 2>&1
+            foreach ($line in @($result)) {
+                if ($line -match 'STATE\s*:\s*\d+\s+(\w+)') {
+                    return $Matches[1].ToUpperInvariant()
+                }
+            }
+        } catch {
+        }
+    }
+
+    return $null
+}
+
+function Test-HarryAgentServiceRegistered {
+    $state = Get-HarryAgentServiceState
+    return -not [string]::IsNullOrWhiteSpace($state)
 }
 
 function Wait-HarryAgentServiceProcessExit {
@@ -96,13 +119,13 @@ function Wait-HarryAgentServiceProcessExit {
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        if (-not (Test-HarryAgentServiceProcessRunning)) {
+        if (-not (Test-HarryAgentServiceRegistered)) {
             return $true
         }
         Start-Sleep -Milliseconds 500
     }
 
-    return -not (Test-HarryAgentServiceProcessRunning)
+    return -not (Test-HarryAgentServiceRegistered)
 }
 
 function Wait-HarryAgentServiceProcessStart {
@@ -112,13 +135,13 @@ function Wait-HarryAgentServiceProcessStart {
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        if (Test-HarryAgentServiceProcessRunning) {
+        if ((Get-HarryAgentServiceState) -eq "RUNNING") {
             return $true
         }
         Start-Sleep -Milliseconds 500
     }
 
-    return Test-HarryAgentServiceProcessRunning
+    return (Get-HarryAgentServiceState) -eq "RUNNING"
 }
 
 function Stop-HarryAgentService {
@@ -126,7 +149,7 @@ function Stop-HarryAgentService {
         return
     }
 
-    if (-not (Test-HarryAgentServiceProcessRunning)) {
+    if (-not (Test-HarryAgentServiceRegistered)) {
         return
     }
 
@@ -154,6 +177,10 @@ function Start-HarryAgentService {
     Write-Host "Installing Harry Agent service..."
     if (-not (Invoke-ServiceCommand -Action "install")) {
         throw "Failed to install Harry Agent service."
+    }
+
+    if (-not (Test-HarryAgentServiceRegistered)) {
+        throw "Harry Agent service did not register after install."
     }
 
     Write-Host "Starting Harry Agent service..."
@@ -479,6 +506,7 @@ $AgentExe = Join-Path $InstallRoot "harry_agent.exe"
 $ConfigPath = Join-Path $InstallRoot "agent_config.json"
 $ServiceExe = Join-Path $InstallRoot "HarryAgentService.exe"
 $ServiceXml = Join-Path $InstallRoot "HarryAgentService.xml"
+$DiagnoseScript = Join-Path $InstallRoot "diagnose.ps1"
 $UpdaterScript = Join-Path $InstallRoot "update_agent.ps1"
 $WrapperLog = Join-Path $InstallRoot "HarryAgentService.wrapper.log"
 $OutLog = Join-Path $InstallRoot "HarryAgentService.out.log"
@@ -571,6 +599,16 @@ if (Test-Path ".\update_agent.ps1") {
     Write-Host "ERROR: update_agent.ps1 not found in the package folder."
     Write-Host "Expected at: $scriptDir\update_agent.ps1"
     Write-InstallLog "missing_file update_agent.ps1"
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+if (Test-Path ".\diagnose.ps1") {
+    Copy-Item ".\diagnose.ps1" $DiagnoseScript -Force
+} else {
+    Write-Host "ERROR: diagnose.ps1 not found in the package folder."
+    Write-Host "Expected at: $scriptDir\diagnose.ps1"
+    Write-InstallLog "missing_file diagnose.ps1"
     Read-Host "Press Enter to exit"
     exit 1
 }
@@ -711,6 +749,8 @@ if (Test-Path $ConfigPath) {
 
 $config.public_base_url = $brain
 $config.brain_url = $brain
+$config.ingest_url = "$brain/ingest"
+$config.agent_version = $agentVersion
 $config.configured_at = (Get-Date).ToUniversalTime().ToString("o")
 $config | ConvertTo-Json | Set-Content -Encoding UTF8 $ConfigPath
 
@@ -734,6 +774,29 @@ Start-HarryAgentService
 Write-InstallLog "service_started"
 
 try {
+    $agentVersion = (& $AgentExe --version 2>$null | Select-Object -First 1).Trim()
+} catch {
+    $agentVersion = ""
+}
+
+if ([string]::IsNullOrWhiteSpace($agentVersion)) {
+    $agentVersion = "unknown"
+    Write-InstallLog "agent_version_unavailable"
+} else {
+    Write-InstallLog "agent_version=$agentVersion"
+}
+
+$serviceState = Get-HarryAgentServiceState
+if ([string]::IsNullOrWhiteSpace($serviceState)) {
+    $serviceState = "unknown"
+}
+
+Write-Host ""
+Write-Host "Verifying installed agent..."
+Write-Host "Agent version: $agentVersion"
+Write-Host "Service registration: $serviceState"
+
+try {
     Run-AgentOnce
 } catch {
     Write-Host ""
@@ -746,6 +809,7 @@ try {
 Write-Host ""
 Write-Host "Harry Agent installed successfully."
 Write-Host "Upgraded existing install: $([bool]$HadExistingInstall)"
+Write-Host "Service registration: $serviceState"
 try {
     $installedVersion = (& $AgentExe --version 2>$null | Select-Object -First 1).Trim()
     if ($installedVersion) {
@@ -756,6 +820,8 @@ try {
 }
 Write-Host "Installed agent path: $AgentExe"
 Write-Host "Configured Brain URL: $brain"
+Write-Host "Ingest URL: $brain/ingest"
+Write-Host "Diagnostic script: $DiagnoseScript"
 Write-Host "Install log: $InstallLog"
 Write-Host "Runtime log: $RuntimeLog"
 Write-Host "Files:   $InstallRoot"
@@ -764,6 +830,7 @@ Write-Host "Logs:"
 Write-Host "  Wrapper: $WrapperLog"
 Write-Host "  Output : $OutLog"
 Write-Host "  Errors : $ErrLog"
+Write-Host "  Diagnose: $DiagnoseScript"
 Write-Host "  Install : $InstallLog"
 Write-Host "  Runtime : $RuntimeLog"
 Write-Host ""

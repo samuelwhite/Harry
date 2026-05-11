@@ -10,6 +10,7 @@ WINDOWS_FILES = [
     "START-HERE.txt",
     "agent_config.sample.json",
     "harry_agent.exe",
+    "diagnose.ps1",
     "install_agent.ps1",
     "update_agent.ps1",
     "uninstall_agent.ps1",

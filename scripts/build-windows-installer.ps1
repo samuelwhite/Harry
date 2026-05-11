@@ -65,7 +65,7 @@ function Invoke-PythonJson {
         $result = & python -c $Command 2>&1
         if ($LASTEXITCODE -ne 0) {
             $message = ($result | Out-String).Trim()
-            throw "Failed to import app.versions or app.ui.db while gathering Windows installer metadata.`n$message"
+            throw "Failed to import app.versions or load app.ui.db while gathering Windows installer metadata.`n$message"
         }
 
         $json = ($result | Out-String).Trim()
@@ -101,7 +101,30 @@ if (-not (Test-Path $InstallerExe)) {
 
 Copy-Item $InstallerExe (Join-Path $DownloadDir "HarryAgentSetup.exe") -Force
 
-$versionsJson = Invoke-PythonJson "import json; from app.versions import BRAIN_VERSION, AGENT_VERSION; from app.ui.db import _load_schema_current; print(json.dumps({'brain_version': BRAIN_VERSION, 'agent_version': AGENT_VERSION, 'schema_current': _load_schema_current()}))"
+$rootLiteral = $Root -replace '\\', '\\\\'
+$versionsCommand = @"
+import json
+import importlib.util
+import pathlib
+import sys
+
+from app.versions import BRAIN_VERSION, AGENT_VERSION
+
+root = pathlib.Path(r"$rootLiteral")
+db_path = root / "app" / "app" / "ui" / "db.py"
+spec = importlib.util.spec_from_file_location("app.ui.db", db_path)
+if spec is None or spec.loader is None:
+    raise ImportError(f"Unable to load app.ui.db from {db_path}")
+module = importlib.util.module_from_spec(spec)
+sys.modules["app.ui.db"] = module
+spec.loader.exec_module(module)
+print(json.dumps({
+    "brain_version": BRAIN_VERSION,
+    "agent_version": AGENT_VERSION,
+    "schema_current": module._load_schema_current(),
+}))
+"@
+$versionsJson = Invoke-PythonJson $versionsCommand
 $versions = $versionsJson | ConvertFrom-Json
 
 if (-not $versions -or [string]::IsNullOrWhiteSpace([string]$versions.brain_version) -or [string]::IsNullOrWhiteSpace([string]$versions.agent_version) -or [string]::IsNullOrWhiteSpace([string]$versions.schema_current)) {

@@ -16,6 +16,7 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "Searching for Harry Brain" in text
         assert "Discovery candidates" in text
         assert "update_agent.ps1" in text
+        assert "diagnose.ps1" in text
         assert "HARRY_PUBLIC_BASE_URL" in text
         assert "harry.local" in text
         assert "harry-brain.local" in text
@@ -24,16 +25,22 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "8789" in text
         assert "No Brain was auto-discovered." in text
         assert "Harry Brain address" in text
+        assert "ERROR: No Brain address provided." in text
+        assert "brain_auto_discovery_failed_noninteractive" in text
         assert "Stop-HarryAgentService" in text
         assert "Wait-HarryAgentServiceProcessExit" in text
         assert "Wait-HarryAgentServiceProcessStart" in text
         assert "Start-HarryAgentService" in text
         assert "Run-AgentOnce" in text
         assert "taskkill.exe" in text
+        assert "sc.exe" in text
+        assert 'query "HarryAgent"' in text or "query $ServiceName" in text
         assert 'Join-Path $InstallRoot "logs"' in text
         assert "HarryAgent.install.log" in text
         assert "config.public_base_url = $brain" in text
         assert "config.brain_url = $brain" in text
+        assert "config.ingest_url = \"$brain/ingest\"" in text
+        assert "config.agent_version = $agentVersion" in text
         assert "Starting Harry Agent service..." in text
 
 
@@ -88,9 +95,14 @@ def test_windows_agent_docs_mention_diagnostics_commands():
 def test_windows_installer_logs_are_documented():
     readme = Path("README.md").read_text(encoding="utf-8")
     script = Path("agent/windows/install_agent.ps1").read_text(encoding="utf-8")
+    diagnose = Path("agent/windows/diagnose.ps1").read_text(encoding="utf-8")
 
     assert "C:\\ProgramData\\Harry\\logs\\HarryAgent.install.log" in readme
     assert "C:\\ProgramData\\Harry\\logs\\HarryAgent.runtime.log" in readme
     assert "C:\\ProgramData\\Harry\\logs\\HarryAgentService.wrapper.log" in readme
     assert "Install log:" in script
     assert "Runtime log:" in script
+    assert "Installed files:" in diagnose
+    assert "Configured Brain URL:" in diagnose
+    assert "Service status:" in diagnose
+    assert "Health / discovery test:" in diagnose

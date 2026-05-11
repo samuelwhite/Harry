@@ -16,7 +16,7 @@ def test_windows_installer_release_script_describes_current_pipeline():
     assert "HarryAgentSetup.exe" in script
     assert "HarryAgentSetup.manifest.json" in script
     assert "PYTHONPATH" in script
-    assert "Failed to import app.versions or app.ui.db" in script
+    assert "Failed to import app.versions or load app.ui.db" in script
     assert "Windows installer version metadata was empty or invalid" in script
     assert "Installer artifact:" in script
     assert "Manifest:" in script
@@ -68,5 +68,6 @@ def test_windows_installer_manifest_is_expected_runtime_name():
     assert "optional manual build-and-copy flow" in readme
     assert "C:\\ProgramData\\Harry\\logs\\HarryAgent.install.log" in readme
     assert "C:\\ProgramData\\Harry\\logs\\HarryAgent.runtime.log" in readme
+    assert "C:\\ProgramData\\Harry\\diagnose.ps1" in readme
     assert "--diagnostics" in readme
     assert "--once" in readme
