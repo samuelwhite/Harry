@@ -22,6 +22,11 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "/discover" in text
         assert "/.well-known/harry-brain" in text
         assert "8789" in text
+        assert "Stop-HarryAgentService" in text
+        assert "Wait-HarryAgentServiceProcessExit" in text
+        assert "Wait-HarryAgentServiceProcessStart" in text
+        assert "Start-HarryAgentService" in text
+        assert "taskkill.exe" in text
 
 
 def test_windows_installer_examples_are_public_and_generic():
@@ -44,6 +49,9 @@ def test_windows_agent_installer_sources_runtime_agent_package():
     assert "install_agent.ps1" in agent_iss
     assert "powershell.exe" in agent_iss
     assert "HarryAgentSetup.exe" not in agent_iss or "install_agent.ps1" in agent_iss
+    assert "CurStepChanged" in agent_iss
+    assert "StopHarryAgentServiceForUpgrade" in agent_iss
+    assert "HarryAgentService.exe" in agent_iss
 
     assert "install_agent.ps1" in brain_iss
     assert "HarryAgentSetup.exe" not in brain_iss

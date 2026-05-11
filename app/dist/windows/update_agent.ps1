@@ -37,6 +37,91 @@ function Invoke-ServiceCommand {
     }
 }
 
+function Test-HarryAgentServiceProcessRunning {
+    try {
+        return [bool](Get-Process -Name "HarryAgentService" -ErrorAction SilentlyContinue)
+    } catch {
+        return $false
+    }
+}
+
+function Wait-HarryAgentServiceProcessExit {
+    param(
+        [int]$TimeoutSeconds = 20
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Test-HarryAgentServiceProcessRunning)) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    return -not (Test-HarryAgentServiceProcessRunning)
+}
+
+function Wait-HarryAgentServiceProcessStart {
+    param(
+        [int]$TimeoutSeconds = 20
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-HarryAgentServiceProcessRunning) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    return Test-HarryAgentServiceProcessRunning
+}
+
+function Stop-HarryAgentService {
+    if (-not (Test-Path $ServiceExe)) {
+        return
+    }
+
+    if (-not (Test-HarryAgentServiceProcessRunning)) {
+        return
+    }
+
+    Write-Host "Stopping Harry Agent service..."
+    [void](Invoke-ServiceCommand -Action "stop")
+
+    if (-not (Wait-HarryAgentServiceProcessExit -TimeoutSeconds 20)) {
+        Write-Host "Service is still running; trying taskkill fallback..." -ForegroundColor Yellow
+        try {
+            & (Join-Path $env:SystemRoot "System32\taskkill.exe") /F /T /IM "HarryAgentService.exe" | Out-Host
+        } catch {
+            Write-UpdateLog "taskkill_failed error=$($_.Exception.Message)"
+        }
+        if (-not (Wait-HarryAgentServiceProcessExit -TimeoutSeconds 10)) {
+            throw "Harry Agent service is still running after stop attempts."
+        }
+    }
+}
+
+function Start-HarryAgentService {
+    if (-not (Test-Path $ServiceExe)) {
+        throw "HarryAgentService.exe was not found after installation."
+    }
+
+    Write-Host "Installing Harry Agent service..."
+    if (-not (Invoke-ServiceCommand -Action "install")) {
+        throw "Failed to install Harry Agent service."
+    }
+
+    Write-Host "Starting Harry Agent service..."
+    if (-not (Invoke-ServiceCommand -Action "start")) {
+        throw "Failed to start Harry Agent service."
+    }
+
+    if (-not (Wait-HarryAgentServiceProcessStart -TimeoutSeconds 20)) {
+        throw "Harry Agent service did not start successfully."
+    }
+}
+
 function Test-ExeHeader {
     param([string]$Path)
 
@@ -102,23 +187,14 @@ try {
         $backupMade = $true
     }
 
-    Write-Host "Stopping Harry Agent service..."
-    Invoke-ServiceCommand -Action "stop"
+    Stop-HarryAgentService
 
     Write-Host "Uninstalling Harry Agent service..."
     Invoke-ServiceCommand -Action "uninstall"
 
     Move-Item -Force $tempExe $AgentExe
 
-    Write-Host "Installing Harry Agent service..."
-    if (Test-Path $ServiceExe) {
-        & $ServiceExe install | Out-Host
-    }
-
-    Write-Host "Starting Harry Agent service..."
-    if (Test-Path $ServiceExe) {
-        & $ServiceExe start | Out-Host
-    }
+    Start-HarryAgentService
 
     Write-Host "Windows agent updated successfully."
     Write-Host "Current version: $CurrentVersion"
@@ -141,8 +217,7 @@ try {
 
     try {
         if (Test-Path $ServiceExe) {
-            & $ServiceExe install | Out-Host
-            & $ServiceExe start | Out-Host
+            Start-HarryAgentService
         }
     } catch {
         Write-UpdateLog "restart_failed error=$($_.Exception.Message)"

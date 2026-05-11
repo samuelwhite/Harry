@@ -63,6 +63,109 @@ function Get-DefaultBrainPort {
     return 8789
 }
 
+function Invoke-ServiceCommand {
+    param(
+        [string]$Action
+    )
+
+    if (-not (Test-Path $ServiceExe)) {
+        return $false
+    }
+
+    try {
+        & $ServiceExe $Action | Out-Host
+        return $true
+    } catch {
+        Write-Host "Service command '$Action' failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
+function Test-HarryAgentServiceProcessRunning {
+    try {
+        return [bool](Get-Process -Name "HarryAgentService" -ErrorAction SilentlyContinue)
+    } catch {
+        return $false
+    }
+}
+
+function Wait-HarryAgentServiceProcessExit {
+    param(
+        [int]$TimeoutSeconds = 20
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Test-HarryAgentServiceProcessRunning)) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    return -not (Test-HarryAgentServiceProcessRunning)
+}
+
+function Wait-HarryAgentServiceProcessStart {
+    param(
+        [int]$TimeoutSeconds = 20
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-HarryAgentServiceProcessRunning) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    return Test-HarryAgentServiceProcessRunning
+}
+
+function Stop-HarryAgentService {
+    if (-not (Test-Path $ServiceExe)) {
+        return
+    }
+
+    if (-not (Test-HarryAgentServiceProcessRunning)) {
+        return
+    }
+
+    Write-Host "Stopping Harry Agent service..."
+    [void](Invoke-ServiceCommand -Action "stop")
+
+    if (-not (Wait-HarryAgentServiceProcessExit -TimeoutSeconds 20)) {
+        Write-Host "Service is still running; trying taskkill fallback..." -ForegroundColor Yellow
+        try {
+            & (Join-Path $env:SystemRoot "System32\taskkill.exe") /F /T /IM "HarryAgentService.exe" | Out-Host
+        } catch {
+            Write-Host "taskkill fallback failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        if (-not (Wait-HarryAgentServiceProcessExit -TimeoutSeconds 10)) {
+            throw "Harry Agent service is still running after stop attempts."
+        }
+    }
+}
+
+function Start-HarryAgentService {
+    if (-not (Test-Path $ServiceExe)) {
+        throw "HarryAgentService.exe was not found after installation."
+    }
+
+    Write-Host "Installing Harry Agent service..."
+    if (-not (Invoke-ServiceCommand -Action "install")) {
+        throw "Failed to install Harry Agent service."
+    }
+
+    Write-Host "Starting Harry Agent service..."
+    if (-not (Invoke-ServiceCommand -Action "start")) {
+        throw "Failed to start Harry Agent service."
+    }
+
+    if (-not (Wait-HarryAgentServiceProcessStart -TimeoutSeconds 20)) {
+        throw "Harry Agent service did not start successfully."
+    }
+}
+
 function Get-FirstLocalIPv4 {
     try {
         $ips = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
@@ -387,6 +490,10 @@ Write-Host ""
 
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
 
+if ($HadExistingInstall) {
+    Stop-HarryAgentService
+}
+
 if (Test-Path ".\harry_agent.exe") {
     Copy-Item ".\harry_agent.exe" $AgentExe -Force
 } else {
@@ -557,23 +664,12 @@ Write-Host ""
 Write-Host "Refreshing Harry Agent service..."
 
 try {
-    & $ServiceExe stop | Out-Host
-} catch {
-    Write-Host "Service stop skipped."
-}
-
-try {
     & $ServiceExe uninstall | Out-Host
 } catch {
     Write-Host "Service uninstall skipped."
 }
 
-Write-Host ""
-Write-Host "Installing Harry Agent service..."
-& $ServiceExe install
-
-Write-Host "Starting Harry Agent service..."
-& $ServiceExe start
+Start-HarryAgentService
 
 Write-Host ""
 Write-Host "Harry Agent installed successfully."
