@@ -66,3 +66,7 @@ def test_windows_installer_manifest_is_expected_runtime_name():
     assert "normal `git pull` or `update-harry` refreshes them" in readme
     assert "generated, but committed here as the latest stable artifact" in readme
     assert "optional manual build-and-copy flow" in readme
+    assert "C:\\ProgramData\\Harry\\logs\\HarryAgent.install.log" in readme
+    assert "C:\\ProgramData\\Harry\\logs\\HarryAgent.runtime.log" in readme
+    assert "--diagnostics" in readme
+    assert "--once" in readme

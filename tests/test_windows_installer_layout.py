@@ -22,11 +22,19 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "/discover" in text
         assert "/.well-known/harry-brain" in text
         assert "8789" in text
+        assert "No Brain was auto-discovered." in text
+        assert "Harry Brain address" in text
         assert "Stop-HarryAgentService" in text
         assert "Wait-HarryAgentServiceProcessExit" in text
         assert "Wait-HarryAgentServiceProcessStart" in text
         assert "Start-HarryAgentService" in text
+        assert "Run-AgentOnce" in text
         assert "taskkill.exe" in text
+        assert 'Join-Path $InstallRoot "logs"' in text
+        assert "HarryAgent.install.log" in text
+        assert "config.public_base_url = $brain" in text
+        assert "config.brain_url = $brain" in text
+        assert "Starting Harry Agent service..." in text
 
 
 def test_windows_installer_examples_are_public_and_generic():
@@ -52,6 +60,7 @@ def test_windows_agent_installer_sources_runtime_agent_package():
     assert "CurStepChanged" in agent_iss
     assert "StopHarryAgentServiceForUpgrade" in agent_iss
     assert "HarryAgentService.exe" in agent_iss
+    assert "Flags: waituntilterminated" in agent_iss
 
     assert "install_agent.ps1" in brain_iss
     assert "HarryAgentSetup.exe" not in brain_iss
@@ -74,3 +83,14 @@ def test_windows_agent_docs_mention_diagnostics_commands():
     for text in (readme, start_here):
         assert "--diagnostics" in text
         assert "--version" in text
+
+
+def test_windows_installer_logs_are_documented():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    script = Path("agent/windows/install_agent.ps1").read_text(encoding="utf-8")
+
+    assert "C:\\ProgramData\\Harry\\logs\\HarryAgent.install.log" in readme
+    assert "C:\\ProgramData\\Harry\\logs\\HarryAgent.runtime.log" in readme
+    assert "C:\\ProgramData\\Harry\\logs\\HarryAgentService.wrapper.log" in readme
+    assert "Install log:" in script
+    assert "Runtime log:" in script

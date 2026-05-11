@@ -15,6 +15,9 @@ psutil = None
 AGENT_VERSION = "0.2.5"
 SCHEMA_VERSION = "0.2.3"
 CONFIG_PATH = r"C:\ProgramData\Harry\agent_config.json"
+LOG_DIR = Path(r"C:\ProgramData\Harry\logs")
+RUNTIME_LOG_PATH = LOG_DIR / "HarryAgent.runtime.log"
+SERVICE_NAME = "HarryAgent"
 POLL_SECONDS = 30
 UPDATE_SCRIPT_NAME = "update_agent.ps1"
 
@@ -30,6 +33,16 @@ def load_config() -> dict:
             return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def write_runtime_log(message: str) -> None:
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        ts = iso_now()
+        with open(RUNTIME_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {message}\n")
+    except Exception:
+        pass
 
 
 def _version_key(value: str | None) -> tuple[int, ...]:
@@ -77,12 +90,40 @@ def _update_script_path() -> Path:
     return _install_root() / UPDATE_SCRIPT_NAME
 
 
+def _service_status() -> str:
+    try:
+        result = subprocess.run(
+            ["sc", "query", SERVICE_NAME],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except Exception as exc:
+        return f"unknown ({exc})"
+
+    output = (result.stdout or "") + "\n" + (result.stderr or "")
+    if "FAILED 1060" in output or "does not exist" in output.lower():
+        return "not installed"
+
+    for line in output.splitlines():
+        if "STATE" in line:
+            parts = line.split()
+            if parts:
+                return parts[-1]
+
+    return "unknown"
+
+
 def _brain_update_script_url(discovery: dict | None = None) -> str:
     if discovery and isinstance(discovery, dict):
         candidate = str(discovery.get("agent_update_script_url") or "").strip()
         if candidate:
             return candidate
     return f"{BRAIN_URL.rstrip('/')}/downloads/windows-update-script"
+
+
+def _brain_health_url() -> str:
+    return f"{BRAIN_URL.rstrip('/')}/health"
 
 
 def _fetch_brain_discovery() -> dict | None:
@@ -109,6 +150,41 @@ def _fetch_brain_discovery() -> dict | None:
     if data.get("service") != "harry-brain" or data.get("ok") is not True:
         return None
     return data
+
+
+def _probe_brain_health() -> tuple[bool, int | None, str]:
+    req = urllib.request.Request(
+        _brain_health_url(),
+        headers={"Accept": "application/json"},
+        method="GET",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return True, int(getattr(resp, "status", 200)), "ok"
+    except urllib.error.HTTPError as exc:
+        return False, int(exc.code), exc.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        return False, None, str(exc)
+
+
+def _probe_ingest(payload: dict) -> tuple[bool, int | None, str]:
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        ENDPOINT,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            return True, int(getattr(resp, "status", 200)), body
+    except urllib.error.HTTPError as exc:
+        return False, int(exc.code), exc.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        return False, None, str(exc)
 
 
 def _launch_windows_updater(update_url: str) -> bool:
@@ -650,23 +726,25 @@ def build_payload() -> dict:
 
 
 def send(payload: dict) -> None:
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        ENDPOINT,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    ok, status, body = _probe_ingest(payload)
+    if ok:
+        message = f"Sent OK: HTTP {status} {body}"
+        print(message)
+        write_runtime_log(f"ingest_success status={status} endpoint={ENDPOINT}")
+        return
+
+    message = f"Failed to send: {body}" if status is None else f"HTTP error: {status} {body}"
+    print(message)
+    write_runtime_log(
+        f"ingest_failure status={status if status is not None else 'unknown'} endpoint={ENDPOINT} error={body}"
     )
 
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-            print(f"Sent OK: HTTP {resp.status} {body}")
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        print(f"HTTP error: {e.code} {body}")
-    except urllib.error.URLError as e:
-        print(f"Failed to send: {e}")
+
+def run_once() -> int:
+    payload = build_payload()
+    print("Sending payload for node:", payload["node"])
+    send(payload)
+    return 0
 
 
 def build_diagnostics_summary() -> dict:
@@ -676,16 +754,28 @@ def build_diagnostics_summary() -> dict:
     if not isinstance(gpus, list):
         gpus = []
 
+    health_ok, health_status, health_body = _probe_brain_health()
+    ingest_ok, ingest_status, ingest_body = _probe_ingest(payload)
+
     return {
         "agent_version": AGENT_VERSION,
         "brain_url": BRAIN_URL,
         "endpoint": ENDPOINT,
+        "configured_brain_url": BRAIN_URL,
+        "service_name": SERVICE_NAME,
+        "service_status": _service_status(),
         "psutil_available": _ensure_psutil() is not None,
         "discovery_ok": bool(discovery.get("ok")),
         "discovery_service": discovery.get("service"),
         "discovery_agent_version": discovery.get("agent_version"),
         "discovery_canonical_base_url": discovery.get("canonical_base_url"),
         "discovery_recommended_lan_url": discovery.get("recommended_lan_url"),
+        "health_check_ok": health_ok,
+        "health_check_status": health_status,
+        "health_check_body": health_body,
+        "ingest_probe_ok": ingest_ok,
+        "ingest_probe_status": ingest_status,
+        "ingest_probe_body": ingest_body,
         "gpu_count": len(gpus),
         "payload_node": payload.get("node"),
         "payload_last_seen": payload.get("ts"),
@@ -701,6 +791,11 @@ def main() -> None:
         action="store_true",
         help="Print a local diagnostics summary and exit without sending telemetry.",
     )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Send one telemetry payload and exit.",
+    )
     args = parser.parse_args()
 
     if args.version:
@@ -712,9 +807,14 @@ def main() -> None:
         print(json.dumps(summary, indent=2, sort_keys=True))
         return
 
+    if args.once:
+        exit_code = run_once()
+        raise SystemExit(exit_code)
+
     print("Harry Windows Agent starting")
     print("Brain:", BRAIN_URL)
     print("Endpoint:", ENDPOINT)
+    write_runtime_log(f"agent_start brain={BRAIN_URL} endpoint={ENDPOINT}")
 
     if maybe_self_update():
         print("Windows agent update started; exiting to let the updater replace the binary.")
@@ -723,6 +823,7 @@ def main() -> None:
     while True:
         payload = build_payload()
         print("Sending payload for node:", payload["node"])
+        write_runtime_log(f"send_loop node={payload['node']}")
         send(payload)
         time.sleep(POLL_SECONDS)
 

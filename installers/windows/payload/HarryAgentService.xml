@@ -6,7 +6,7 @@
   <executable>harry_agent.exe</executable>
   <workingdirectory>%BASE%</workingdirectory>
 
-  <logpath>%BASE%</logpath>
+  <logpath>%BASE%\logs</logpath>
   <log mode="roll-by-size">
     <sizeThreshold>10240</sizeThreshold>
     <keepFiles>3</keepFiles>

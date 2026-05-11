@@ -31,7 +31,7 @@ Filename: "{app}\HarryAgentService.exe"; Parameters: "stop"; Flags: runhidden sk
 Filename: "{app}\HarryAgentService.exe"; Parameters: "uninstall"; Flags: runhidden skipifdoesntexist
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install_agent.ps1"""; Flags: runhidden waituntilterminated; StatusMsg: "Searching for Harry Brain and finalising setup..."
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install_agent.ps1"""; Flags: waituntilterminated; StatusMsg: "Searching for Harry Brain and finalising setup..."
 
 [Code]
 const

@@ -472,6 +472,9 @@ if (-not (Test-IsAdmin)) {
 Set-Location $scriptDir
 
 $InstallRoot = "C:\ProgramData\Harry"
+$LogDir = Join-Path $InstallRoot "logs"
+$InstallLog = Join-Path $LogDir "HarryAgent.install.log"
+$RuntimeLog = Join-Path $LogDir "HarryAgent.runtime.log"
 $AgentExe = Join-Path $InstallRoot "harry_agent.exe"
 $ConfigPath = Join-Path $InstallRoot "agent_config.json"
 $ServiceExe = Join-Path $InstallRoot "HarryAgentService.exe"
@@ -482,16 +485,54 @@ $OutLog = Join-Path $InstallRoot "HarryAgentService.out.log"
 $ErrLog = Join-Path $InstallRoot "HarryAgentService.err.log"
 $HadExistingInstall = (Test-Path $AgentExe) -or (Test-Path $ServiceExe) -or (Test-Path $ServiceXml) -or (Test-Path $ConfigPath)
 
+function Write-InstallLog {
+    param([string]$Message)
+
+    try {
+        New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+        $ts = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        Add-Content -Path $InstallLog -Value "[$ts] $Message" -Encoding UTF8
+    } catch {
+    }
+}
+
+function Run-AgentOnce {
+    Write-Host "Running one-shot telemetry send..."
+    Write-InstallLog "agent_once_start"
+
+    $output = & $AgentExe --once 2>&1
+    $exitCode = $LASTEXITCODE
+
+    if ($output) {
+        $output | ForEach-Object {
+            Write-Host $_
+            Write-InstallLog ("agent_once_output {0}" -f $_)
+        }
+    }
+
+    if ($exitCode -ne 0) {
+        Write-InstallLog "agent_once_failed exit_code=$exitCode"
+        throw "Windows agent did not complete its first telemetry send."
+    }
+
+    Write-InstallLog "agent_once_success exit_code=$exitCode"
+}
+
 Write-Host ""
 Write-Host "Installing Harry Agent to $InstallRoot ..."
 Write-Host "Installer source folder: $scriptDir"
 Write-Host ("Existing install detected: {0}" -f ($(if ($HadExistingInstall) { "yes" } else { "no" })))
+Write-Host "Install log: $InstallLog"
+Write-Host "Runtime log: $RuntimeLog"
+Write-InstallLog "installer_start existing_install=$HadExistingInstall source=$scriptDir"
 Write-Host ""
 
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 if ($HadExistingInstall) {
     Stop-HarryAgentService
+    Write-InstallLog "existing_service_stopped"
 }
 
 if (Test-Path ".\harry_agent.exe") {
@@ -499,6 +540,7 @@ if (Test-Path ".\harry_agent.exe") {
 } else {
     Write-Host "ERROR: harry_agent.exe not found in the package folder."
     Write-Host "Expected at: $scriptDir\harry_agent.exe"
+    Write-InstallLog "missing_file harry_agent.exe"
     Read-Host "Press Enter to exit"
     exit 1
 }
@@ -508,6 +550,7 @@ if (Test-Path ".\HarryAgentService.xml") {
 } else {
     Write-Host "ERROR: HarryAgentService.xml not found in the package folder."
     Write-Host "Expected at: $scriptDir\HarryAgentService.xml"
+    Write-InstallLog "missing_file HarryAgentService.xml"
     Read-Host "Press Enter to exit"
     exit 1
 }
@@ -517,6 +560,7 @@ if (Test-Path ".\HarryAgentService.exe") {
 } else {
     Write-Host "ERROR: HarryAgentService.exe not found in the package folder."
     Write-Host "Expected at: $scriptDir\HarryAgentService.exe"
+    Write-InstallLog "missing_file HarryAgentService.exe"
     Read-Host "Press Enter to exit"
     exit 1
 }
@@ -526,6 +570,7 @@ if (Test-Path ".\update_agent.ps1") {
 } else {
     Write-Host "ERROR: update_agent.ps1 not found in the package folder."
     Write-Host "Expected at: $scriptDir\update_agent.ps1"
+    Write-InstallLog "missing_file update_agent.ps1"
     Read-Host "Press Enter to exit"
     exit 1
 }
@@ -544,19 +589,23 @@ if (-not [string]::IsNullOrWhiteSpace($env:HARRY_PUBLIC_BASE_URL)) {
     try {
         $brain = Normalize-BrainUrl $env:HARRY_PUBLIC_BASE_URL
         Write-Host "Using HARRY_PUBLIC_BASE_URL: $brain"
+        Write-InstallLog "brain_source=env value=$brain"
     } catch {
         Write-Host ""
         Write-Host "ERROR: HARRY_PUBLIC_BASE_URL is invalid." -ForegroundColor Red
+        Write-InstallLog "brain_source=env invalid"
         Read-Host "Press Enter to exit"
         exit 1
     }
 } else {
     $publicPort = Get-DefaultBrainPort
     $discovered = Discover-HarryBrain -Port $publicPort
+    Write-InstallLog ("discovery_candidates={0}" -f $discovered.Count)
 
     if ($discovered.Count -eq 1) {
         $brain = $discovered[0]
         Write-Host "Auto-discovered Harry Brain: $brain"
+        Write-InstallLog "brain_source=discovery value=$brain"
     } elseif ($discovered.Count -gt 1) {
         if (-not (Test-IsAdmin)) {
             Write-Host "Multiple Harry Brain instances were discovered, but the installer cannot prompt here." -ForegroundColor Yellow
@@ -575,6 +624,7 @@ if (-not [string]::IsNullOrWhiteSpace($env:HARRY_PUBLIC_BASE_URL)) {
 
         if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $discovered.Count) {
             $brain = $discovered[[int]$choice - 1]
+            Write-InstallLog "brain_source=discovery_choice value=$brain"
         }
     }
 }
@@ -593,15 +643,18 @@ if (-not $brain) {
 
         if ([string]::IsNullOrWhiteSpace($brainInput)) {
             Write-Host "ERROR: No Brain address provided." -ForegroundColor Red
+            Write-InstallLog "brain_prompt_cancelled"
             Read-Host "Press Enter to exit"
             exit 1
         }
 
         try {
             $brain = Normalize-BrainUrl $brainInput
+            Write-InstallLog "brain_source=manual value=$brain"
         } catch {
             Write-Host ""
             Write-Host "ERROR: Invalid Harry Brain address: $brainInput" -ForegroundColor Red
+            Write-InstallLog "brain_source=manual invalid"
             Write-Host ""
             Read-Host "Press Enter to exit"
             exit 1
@@ -610,6 +663,7 @@ if (-not $brain) {
         Write-Host ""
         Write-Host "ERROR: Harry Brain could not be auto-discovered in non-interactive mode." -ForegroundColor Red
         Write-Host "Set the Brain address manually and rerun the installer." -ForegroundColor Yellow
+        Write-InstallLog "brain_auto_discovery_failed_noninteractive"
         exit 1
     }
 } else {
@@ -618,6 +672,7 @@ if (-not $brain) {
     } catch {
         Write-Host ""
         Write-Host "ERROR: Invalid discovered Harry Brain address: $brain" -ForegroundColor Red
+        Write-InstallLog "brain_source=discovery invalid"
         Write-Host ""
         Read-Host "Press Enter to exit"
         exit 1
@@ -630,9 +685,11 @@ try {
         throw "Harry Brain did not advertise discovery metadata at $brain"
     }
     $brain = $verified
+    Write-InstallLog "brain_verified=$brain"
 } catch {
     Write-Host ""
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    Write-InstallLog "brain_verification_failed error=$($_.Exception.Message)"
     Write-Host ""
     Read-Host "Press Enter to exit"
     exit 1
@@ -654,22 +711,37 @@ if (Test-Path $ConfigPath) {
 
 $config.public_base_url = $brain
 $config.brain_url = $brain
+$config.configured_at = (Get-Date).ToUniversalTime().ToString("o")
 $config | ConvertTo-Json | Set-Content -Encoding UTF8 $ConfigPath
 
 Write-Host ""
 Write-Host "Saved config to $ConfigPath"
 Write-Host "Brain URL: $brain"
+Write-InstallLog "config_written path=$ConfigPath brain_url=$brain"
 
 Write-Host ""
 Write-Host "Refreshing Harry Agent service..."
 
 try {
     & $ServiceExe uninstall | Out-Host
+    Write-InstallLog "service_uninstall_attempted"
 } catch {
     Write-Host "Service uninstall skipped."
+    Write-InstallLog "service_uninstall_skipped"
 }
 
 Start-HarryAgentService
+Write-InstallLog "service_started"
+
+try {
+    Run-AgentOnce
+} catch {
+    Write-Host ""
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    Write-InstallLog "initial_send_failed error=$($_.Exception.Message)"
+    Read-Host "Press Enter to exit"
+    exit 1
+}
 
 Write-Host ""
 Write-Host "Harry Agent installed successfully."
@@ -684,12 +756,16 @@ try {
 }
 Write-Host "Installed agent path: $AgentExe"
 Write-Host "Configured Brain URL: $brain"
+Write-Host "Install log: $InstallLog"
+Write-Host "Runtime log: $RuntimeLog"
 Write-Host "Files:   $InstallRoot"
 Write-Host "Config:  $ConfigPath"
 Write-Host "Logs:"
 Write-Host "  Wrapper: $WrapperLog"
 Write-Host "  Output : $OutLog"
 Write-Host "  Errors : $ErrLog"
+Write-Host "  Install : $InstallLog"
+Write-Host "  Runtime : $RuntimeLog"
 Write-Host ""
 Write-Host "To watch the main log live in PowerShell, run:"
 Write-Host "  Get-Content `"$OutLog`" -Wait"

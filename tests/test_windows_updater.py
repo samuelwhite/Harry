@@ -94,6 +94,9 @@ def test_windows_agent_diagnostics_flag_prints_summary(monkeypatch, capsys):
             "recommended_lan_url": "http://192.168.1.10:8789",
         },
     )
+    monkeypatch.setattr(win_agent, "_probe_brain_health", lambda: (True, 200, "ok"))
+    monkeypatch.setattr(win_agent, "_probe_ingest", lambda payload: (True, 200, "accepted"))
+    monkeypatch.setattr(win_agent, "_service_status", lambda: "RUNNING")
     monkeypatch.setattr(
         win_agent,
         "build_payload",
@@ -112,3 +115,20 @@ def test_windows_agent_diagnostics_flag_prints_summary(monkeypatch, capsys):
     assert data["discovery_ok"] is True
     assert data["gpu_count"] == 1
     assert data["payload_node"] == "workstation-1"
+    assert data["service_status"] == "RUNNING"
+    assert data["health_check_ok"] is True
+    assert data["ingest_probe_ok"] is True
+
+
+def test_windows_agent_once_flag_runs_single_send(monkeypatch):
+    win_agent = _load_windows_agent(monkeypatch)
+    calls = []
+    monkeypatch.setattr(sys, "argv", ["harry_agent.py", "--once"])
+    monkeypatch.setattr(win_agent, "run_once", lambda: calls.append("run") or 0)
+
+    try:
+        win_agent.main()
+    except SystemExit as exc:
+        assert exc.code == 0
+
+    assert calls == ["run"]

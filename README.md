@@ -86,6 +86,20 @@ The manifest prevents stale installers from being served silently.
 The build step requires Inno Setup 6 and `ISCC.exe` on PATH or installed in the default location.
 The deploy helper is optional for manual copies, not required for normal updates.
 
+Windows install logs are written to:
+
+`C:\ProgramData\Harry\logs\HarryAgent.install.log`
+`C:\ProgramData\Harry\logs\HarryAgent.runtime.log`
+`C:\ProgramData\Harry\logs\HarryAgentService.wrapper.log`
+`C:\ProgramData\Harry\logs\HarryAgentService.out.log`
+`C:\ProgramData\Harry\logs\HarryAgentService.err.log`
+
+After install, the Windows agent runs a one-shot telemetry send automatically.
+For local diagnostics on an installed machine:
+
+`C:\ProgramData\Harry\harry_agent.exe --diagnostics`
+`C:\ProgramData\Harry\harry_agent.exe --once`
+
 ---
 
 ## 🐧 Linux Brain (Most Stable)
