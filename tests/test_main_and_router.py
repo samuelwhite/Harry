@@ -434,14 +434,16 @@ def test_discovery_diagnostics_section_shows_address_context(monkeypatch, tmp_pa
     html = resp.text
     assert "Brain reachable?" in html
     assert "Agents reporting?" in html
-    assert "Installer address configured?" in html
-    assert "Recommended actions" in html
+    assert "Installer artifact" in html
+    assert "Service health" in html
+    assert "Recommendations" in html
     assert "Advanced diagnostics" in html
     assert "Brain Address" in html
     assert "Canonical address" in html
     assert "Recommended LAN" in html
     assert "Container networking" in html
     assert "Discovery methods" in html
+    assert "Installer address configured?" not in html
 
 
 def test_api_page_lists_core_endpoints_and_examples():
@@ -454,6 +456,11 @@ def test_api_page_lists_core_endpoints_and_examples():
     assert "/discover" in html
     assert "/ingest" in html
     assert "/inventory.json" in html
+    assert "Overview" in html
+    assert "Inventory" in html
+    assert "Diagnostics" in html
+    assert "Downloads" in html
+    assert ">API<" in html or "API</a>" in html
     assert 'href="/#overview"' in html
     assert 'href="/inventory' in html
     assert 'href="/diagnostics' in html

@@ -33,6 +33,7 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "Wait-HarryAgentServiceProcessStart" in text
         assert "Test-HarryAgentServiceRunning" in text
         assert "Start-HarryAgentService" in text
+        assert "Invoke-AgentOneShotSend" in text
         assert "Wait-FirstTelemetryResult" in text
         assert "Write-RuntimeMarker" in text
         assert "Test-InstalledAgentState" in text

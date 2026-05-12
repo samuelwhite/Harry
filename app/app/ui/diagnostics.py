@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import ipaddress
+import os
+from pathlib import Path
 from typing import Any, Dict, List
 
 from fastapi import Request
@@ -40,14 +43,14 @@ def _diagnostics_sidebar(hours: int, debug: bool) -> List[Dict[str, Any]]:
                 {"label": "Statistics", "href": "#statistics", "sub": True},
             ],
         },
-	{
-	    "label": "Downloads",
-	    "items": [
-	        {"label": "Agent Installers", "href": "/downloads#downloads-overview", "page": "downloads", "sub": True},
-	        {"label": "Available Downloads", "href": "/downloads#downloads-files", "page": "downloads", "sub": True},
-	        {"label": "Add a Node", "href": "/downloads#downloads-instructions", "page": "downloads", "sub": True},
-	    ],
-	},
+        {
+            "label": "Downloads",
+            "items": [
+                {"label": "Agent Installers", "href": "/downloads#downloads-overview", "page": "downloads", "sub": True},
+                {"label": "Available Downloads", "href": "/downloads#downloads-files", "page": "downloads", "sub": True},
+                {"label": "Add a Node", "href": "/downloads#downloads-instructions", "page": "downloads", "sub": True},
+            ],
+        },
     ]
 
 
@@ -59,7 +62,55 @@ def _diagnostics_actions(hours: int, debug: bool) -> List[Dict[str, str]]:
     ]
 
 
-def _discovery_rows(request: Request) -> List[tuple[str, str, str]]:
+def _downloads_dir() -> Path:
+    configured = (os.environ.get("HARRY_DOWNLOADS_DIR") or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parents[1] / "downloads",
+        here.parents[2] / "downloads",
+        here.parents[3] / "downloads",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return here.parents[3] / "downloads"
+
+
+def _windows_installer_manifest_path() -> Path:
+    return _downloads_dir() / "HarryAgentSetup.manifest.json"
+
+
+def _load_windows_installer_manifest() -> dict[str, object] | None:
+    path = _windows_installer_manifest_path()
+    if not path.exists() or not path.is_file():
+        return None
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    return data if isinstance(data, dict) else None
+
+
+def _windows_installer_is_current(manifest: dict[str, object] | None) -> bool:
+    if not manifest:
+        return False
+
+    schema_current = _load_schema_current()
+    return (
+        str(manifest.get("installer_name") or "") == "HarryAgentSetup.exe"
+        and str(manifest.get("brain_version") or "") == BRAIN_VERSION
+        and str(manifest.get("agent_version") or "") == AGENT_VERSION
+        and str(manifest.get("schema_current") or "") == schema_current
+    )
+
+
+def _advanced_discovery_rows(request: Request) -> List[tuple[str, str, str]]:
     info = resolve_brain_address(request)
     host = (request.headers.get("host") or request.url.hostname or "").strip()
     scheme = (request.url.scheme or "http").strip().lower()
@@ -98,6 +149,29 @@ def _discovery_rows(request: Request) -> List[tuple[str, str, str]]:
         ("Installer discovery", "online" if info.get("display_url") else "warning", installer),
         ("Warning", "warning" if info.get("warning") else "online", warning),
     ]
+
+
+def _installer_artifact_row() -> tuple[str, str, str]:
+    manifest = _load_windows_installer_manifest()
+    if _windows_installer_is_current(manifest):
+        return (
+            "Installer artifact",
+            "online",
+            "Committed Windows installer EXE and manifest are current.",
+        )
+
+    if not manifest:
+        return (
+            "Installer artifact",
+            "warning",
+            "Windows installer EXE or manifest is missing. Rebuild and commit the latest stable artifact.",
+        )
+
+    return (
+        "Installer artifact",
+        "warning",
+        "Windows installer EXE is stale. Rebuild and commit the latest stable artifact.",
+    )
 
 
 def _render_action_card(title: str, body: str, status: str = "info") -> str:
@@ -155,15 +229,21 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
         f"<span>·</span><span>{info_n} info</span>"
     )
 
-    brain_rows = _discovery_rows(request)
-    brain_status = next((status for label, status, _ in brain_rows if label == "Brain Address"), "info")
-    config_status = next((status for label, status, _ in brain_rows if label == "Canonical address"), "info")
-    brain_display = next((text for label, _, text in brain_rows if label == "Brain Address"), "Other machines should use the Brain address shown below.")
-    canonical_display = next((text for label, _, text in brain_rows if label == "Canonical address"), "Set HARRY_PUBLIC_BASE_URL to define the canonical Brain address.")
+    brain_rows = _advanced_discovery_rows(request)
+    brain_address_text = next((text for label, _, text in brain_rows if label == "Brain Address"), "")
+    brain_message = (
+        brain_address_text
+        if "Could not determine" not in brain_address_text
+        else "Set HARRY_PUBLIC_BASE_URL or HARRY_BRAIN_LAN_IP so installers can find the Brain."
+    )
+    brain_status = "online" if "Could not determine" not in brain_address_text else "warning"
+    installer_title, installer_status, installer_body = _installer_artifact_row()
+    service_status = "ok" if not stale_n and not bad_n and not warn_n and not behind else "warn"
+    service_body = f"{healthy_n} healthy, {stale_n} stale, {bad_n + warn_n} needing attention, {behind} behind"
     recommendation_lines = [
         "Set HARRY_PUBLIC_BASE_URL if installers cannot find the Brain.",
         "Install or restart the local agent if this machine is stale.",
-        "Use the Downloads page to verify the installer link and Brain address.",
+        "Rebuild and commit the Windows installer artifact if Downloads is stale.",
     ]
 
     content = f"""
@@ -176,10 +256,10 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
   </div>
 
   <div class="cardgrid">
-    {_render_action_card("Brain reachable?", brain_display, brain_status)}
+    {_render_action_card("Brain reachable?", brain_message, brain_status)}
     {_render_action_card("Agents reporting?", f"{healthy_n} healthy, {stale_n} stale, {behind} behind", "warn" if stale_n or behind else "ok")}
-    {_render_action_card("Installer address configured?", canonical_display, config_status)}
-    {_render_action_card("Recommended actions", " · ".join(recommendation_lines), "info")}
+    {_render_action_card(installer_title, installer_body, installer_status)}
+    {_render_action_card("Service health", service_body, service_status)}
   </div>
 </div>
 

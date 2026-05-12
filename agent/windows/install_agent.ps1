@@ -617,6 +617,41 @@ function Write-RuntimeMarker {
     }
 }
 
+function Invoke-AgentOneShotSend {
+    param(
+        [string]$Reason,
+        [string]$BrainUrl
+    )
+
+    if (-not (Test-Path $AgentExe)) {
+        Write-InstallLog "one_shot_send_skipped reason=$Reason agent_missing"
+        return $false
+    }
+
+    Write-Host "Triggering one-shot telemetry send..."
+    Write-InstallLog "one_shot_send_attempt reason=$Reason brain=$BrainUrl agent=$AgentExe"
+
+    $output = $null
+    try {
+        $output = & $AgentExe --send-once 2>&1
+    } catch {
+        $output = @($_.Exception.Message)
+    }
+
+    $text = @($output) -join "`n"
+    if ($text) {
+        Write-InstallLog "one_shot_send_output $text"
+    }
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-InstallLog "one_shot_send_success exit_code=0"
+        return $true
+    }
+
+    Write-InstallLog "one_shot_send_failure exit_code=$LASTEXITCODE"
+    return $false
+}
+
 function Set-InstallerBusyStatus {
     param([string]$Message)
 
@@ -642,11 +677,13 @@ function Set-InstallerIdleStatus {
 function Wait-FirstTelemetryResult {
     param(
         [string]$SessionId,
+        [string]$BrainUrl,
         [int]$TimeoutSeconds = 180
     )
 
     $marker = "install_validation_start session=$SessionId"
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $fallbackAttempted = $false
     $seenMarker = $false
 
     Write-Host "Waiting for first telemetry send..."
@@ -676,7 +713,24 @@ function Wait-FirstTelemetryResult {
             }
         }
 
+        if (-not $fallbackAttempted -and (Get-Date) -ge $deadline.AddSeconds(-90)) {
+            $fallbackAttempted = $true
+            if (Invoke-AgentOneShotSend -Reason "validation_fallback" -BrainUrl $BrainUrl) {
+                Write-InstallLog "first_telemetry_success via=send_once"
+                return
+            }
+
+            Write-InstallLog "one_shot_send_retry_needed"
+        }
+
         Start-Sleep -Seconds 2
+    }
+
+    if (-not $fallbackAttempted) {
+        if (Invoke-AgentOneShotSend -Reason "validation_timeout" -BrainUrl $BrainUrl) {
+            Write-InstallLog "first_telemetry_success via=send_once_timeout_fallback"
+            return
+        }
     }
 
     throw "Timed out waiting for first telemetry send. See $RuntimeLog"
@@ -954,7 +1008,7 @@ Write-Host "Service registration: $serviceState"
 Write-RuntimeMarker "install_validation_start session=$InstallSessionId brain=$brain"
 
 try {
-    Wait-FirstTelemetryResult -SessionId $InstallSessionId -TimeoutSeconds 60
+    Wait-FirstTelemetryResult -SessionId $InstallSessionId -BrainUrl $brain -TimeoutSeconds 180
 } catch {
     Write-InstallLog "initial_send_failed error=$($_.Exception.Message)"
     throw
