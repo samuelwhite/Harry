@@ -432,7 +432,11 @@ def test_discovery_diagnostics_section_shows_address_context(monkeypatch, tmp_pa
 
     assert resp.status_code == 200
     html = resp.text
-    assert "Discovery diagnostics" in html
+    assert "Brain reachable?" in html
+    assert "Agents reporting?" in html
+    assert "Installer address configured?" in html
+    assert "Recommended actions" in html
+    assert "Advanced diagnostics" in html
     assert "Brain Address" in html
     assert "Canonical address" in html
     assert "Recommended LAN" in html
@@ -450,6 +454,11 @@ def test_api_page_lists_core_endpoints_and_examples():
     assert "/discover" in html
     assert "/ingest" in html
     assert "/inventory.json" in html
+    assert 'href="/#overview"' in html
+    assert 'href="/inventory' in html
+    assert 'href="/diagnostics' in html
+    assert 'href="/downloads' in html
+    assert 'href="/api"' in html
     assert "curl http://&lt;brain-ip&gt;:8789/health" in html
     assert "Invoke-WebRequest http://&lt;brain-ip&gt;:8789/downloads/windows-agent" in html
     assert "import requests" in html

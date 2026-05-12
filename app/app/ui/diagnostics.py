@@ -100,6 +100,20 @@ def _discovery_rows(request: Request) -> List[tuple[str, str, str]]:
     ]
 
 
+def _render_action_card(title: str, body: str, status: str = "info") -> str:
+    return f"""
+<div class="card compactcard">
+  <div class="advrow" style="align-items:flex-start;">
+    <div class="advleft">
+      <div class="advnode">{_html_escape(title)}</div>
+      <div class="advmsg">{_html_escape(body)}</div>
+    </div>
+    <span class="badgetxt {_service_status_class(status)}">{_html_escape(_service_status_label(status))}</span>
+  </div>
+</div>
+"""
+
+
 def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
     nodeviews = build_nodeviews(hours=hours)
 
@@ -141,31 +155,69 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
         f"<span>·</span><span>{info_n} info</span>"
     )
 
+    brain_rows = _discovery_rows(request)
+    brain_status = next((status for label, status, _ in brain_rows if label == "Brain Address"), "info")
+    config_status = next((status for label, status, _ in brain_rows if label == "Canonical address"), "info")
+    brain_display = next((text for label, _, text in brain_rows if label == "Brain Address"), "Other machines should use the Brain address shown below.")
+    canonical_display = next((text for label, _, text in brain_rows if label == "Canonical address"), "Set HARRY_PUBLIC_BASE_URL to define the canonical Brain address.")
+    recommendation_lines = [
+        "Set HARRY_PUBLIC_BASE_URL if installers cannot find the Brain.",
+        "Install or restart the local agent if this machine is stale.",
+        "Use the Downloads page to verify the installer link and Brain address.",
+    ]
+
     content = f"""
-<div class="section" id="discovery-diagnostics">
+<div class="section" id="diagnostic-summary">
   <div class="sectionhead">
     <div>
-      <div class="h2">Discovery diagnostics</div>
-      <div class="h2sub">How Harry Brain presents its address to installers and other machines.</div>
+      <div class="h2">Summary</div>
+      <div class="h2sub">Actionable status at a glance.</div>
     </div>
   </div>
 
-  <div class="card compactcard">
-    <div class="advwrap">
-      {''.join(
-        f'<div class="advrow"><div class="advleft"><div class="advnode">{_html_escape(label)}</div><div class="advmsg">{_html_escape(text)}</div></div><span class="badgetxt {_service_status_class(status)}">{_html_escape(_service_status_label(status))}</span></div>'
-        for label, status, text in _discovery_rows(request)
-      )}
-    </div>
+  <div class="cardgrid">
+    {_render_action_card("Brain reachable?", brain_display, brain_status)}
+    {_render_action_card("Agents reporting?", f"{healthy_n} healthy, {stale_n} stale, {behind} behind", "warn" if stale_n or behind else "ok")}
+    {_render_action_card("Installer address configured?", canonical_display, config_status)}
+    {_render_action_card("Recommended actions", " · ".join(recommendation_lines), "info")}
   </div>
 </div>
 
 <div class="divider"></div>
 
-<div class="section" id="diagnostic-summary">
+<div class="section" id="recommendations">
   <div class="sectionhead">
     <div>
-      <div class="h2">Summary</div>
+      <div class="h2">Recommendations</div>
+      <div class="h2sub">What to do next if something needs attention.</div>
+    </div>
+  </div>
+  {_render_advice_queue(nodeviews)}
+</div>
+
+<div class="divider"></div>
+
+<details class="card compactcard" id="advanced-diagnostics">
+  <summary style="cursor:pointer; list-style:none; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+    <div>
+      <div class="h2" style="margin:0;">Advanced diagnostics</div>
+      <div class="h2sub">Low-level address and discovery details for troubleshooting.</div>
+    </div>
+  </summary>
+  <div class="advwrap" style="margin-top:16px;">
+    {''.join(
+      f'<div class="advrow"><div class="advleft"><div class="advnode">{_html_escape(label)}</div><div class="advmsg">{_html_escape(text)}</div></div><span class="badgetxt {_service_status_class(status)}">{_html_escape(_service_status_label(status))}</span></div>'
+      for label, status, text in brain_rows
+    )}
+  </div>
+</details>
+
+<div class="divider"></div>
+
+<div class="section" id="fleet-status">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">Fleet status</div>
       <div class="h2sub">Operational counts across the fleet.</div>
     </div>
   </div>
@@ -189,20 +241,6 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
     </div>
   </div>
 </div>
-
-<div class="divider"></div>
-
-<div class="section" id="recommendations">
-  <div class="sectionhead">
-    <div>
-      <div class="h2">Recommendations</div>
-      <div class="h2sub">Multiple findings, ordered by severity.</div>
-    </div>
-  </div>
-  {_render_advice_queue(nodeviews)}
-</div>
-
-<div class="divider"></div>
 
 <div class="section" id="statistics">
   <div class="sectionhead">

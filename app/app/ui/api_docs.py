@@ -13,13 +13,28 @@ from .templates import _html_escape, render_shell
 def _section_nav(hours: int = 72) -> List[Dict[str, Any]]:
     return [
         {
-            "label": "API",
-            "page": "api",
+            "label": "Fleet",
             "items": [
-                {"label": "Overview", "href": "#api-overview", "sub": True},
-                {"label": "Endpoints", "href": "#api-endpoints", "sub": True},
-                {"label": "Examples", "href": "#api-examples", "sub": True},
-                {"label": "Discovery", "href": "#api-discovery", "sub": True},
+                {"label": "Overview", "href": "/#overview", "page": "fleet", "sub": True},
+                {"label": "Nodes", "href": "/#fleet-table", "page": "fleet", "sub": True},
+                {"label": "Trends", "href": "/#fleet-trends", "page": "fleet", "sub": True},
+                {"label": "Hidden Nodes", "href": "/#hidden-nodes", "page": "fleet", "sub": True},
+            ],
+        },
+        {
+            "label": "Inventory",
+            "items": [
+                {"label": "Summary", "href": f"/inventory?hours={hours}", "page": "inventory", "sub": True},
+                {"label": "Comparison Table", "href": f"/inventory?hours={hours}#comparison-table", "page": "inventory", "sub": True},
+                {"label": "Details", "href": f"/inventory?hours={hours}#node-details", "page": "inventory", "sub": True},
+            ],
+        },
+        {
+            "label": "Diagnostics",
+            "items": [
+                {"label": "Summary", "href": f"/diagnostics?hours={hours}", "page": "diagnostics", "sub": True},
+                {"label": "Recommendations", "href": f"/diagnostics?hours={hours}#recommendations", "page": "diagnostics", "sub": True},
+                {"label": "Statistics", "href": f"/diagnostics?hours={hours}#statistics", "page": "diagnostics", "sub": True},
             ],
         },
         {

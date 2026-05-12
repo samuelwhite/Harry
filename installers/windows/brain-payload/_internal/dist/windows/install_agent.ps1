@@ -617,10 +617,32 @@ function Write-RuntimeMarker {
     }
 }
 
+function Set-InstallerBusyStatus {
+    param([string]$Message)
+
+    try { $WizardForm.ProgressGauge.Style = npbstMarquee } catch { }
+    try {
+        $WizardForm.StatusLabel.Caption = $Message
+        $WizardForm.StatusLabel.Update()
+    } catch {
+    }
+}
+
+function Set-InstallerIdleStatus {
+    param([string]$Message)
+
+    try { $WizardForm.ProgressGauge.Style = npbstNormal } catch { }
+    try {
+        $WizardForm.StatusLabel.Caption = $Message
+        $WizardForm.StatusLabel.Update()
+    } catch {
+    }
+}
+
 function Wait-FirstTelemetryResult {
     param(
         [string]$SessionId,
-        [int]$TimeoutSeconds = 60
+        [int]$TimeoutSeconds = 180
     )
 
     $marker = "install_validation_start session=$SessionId"
@@ -632,7 +654,7 @@ function Wait-FirstTelemetryResult {
 
     while ((Get-Date) -lt $deadline) {
         if (Test-Path $RuntimeLog) {
-            $lines = @(Get-Content -Path $RuntimeLog -Tail 120 -ErrorAction SilentlyContinue)
+            $lines = @(Get-Content -Path $RuntimeLog -Tail 500 -ErrorAction SilentlyContinue)
             foreach ($line in $lines) {
                 if (-not $seenMarker) {
                     if ($line -match [regex]::Escape($marker)) {

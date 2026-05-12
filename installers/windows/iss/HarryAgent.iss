@@ -66,6 +66,24 @@ begin
   WizardForm.StatusLabel.Update();
 end;
 
+procedure SetInstallerBusyStatus(const MessageText: string);
+begin
+  try
+    WizardForm.ProgressGauge.Style := npbstMarquee;
+  except
+  end;
+  SetInstallerStatus(MessageText);
+end;
+
+procedure SetInstallerIdleStatus(const MessageText: string);
+begin
+  try
+    WizardForm.ProgressGauge.Style := npbstNormal;
+  except
+  end;
+  SetInstallerStatus(MessageText);
+end;
+
 function RunInstallAgentScript: Boolean;
 var
   ResultCode: Integer;
@@ -83,10 +101,10 @@ begin
       Result := False;
       Exit;
     end;
-    SetInstallerStatus('Installing Harry Agent with the selected Brain address...');
+    SetInstallerBusyStatus('Installing Harry Agent with the selected Brain address...');
   end
   else
-    SetInstallerStatus('Searching for Harry Brain...');
+    SetInstallerBusyStatus('Searching for Harry Brain...');
 
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\HarryAgentPayload\install_agent.ps1') + '"';
   Params := Params + ' -InstallerMode "' + SelectedInstallerMode + '"';
@@ -114,7 +132,7 @@ begin
   end;
 
   InstallSucceeded := True;
-  SetInstallerStatus('Harry Agent installed successfully.');
+  SetInstallerIdleStatus('Harry Agent installed successfully.');
 end;
 
 function IsHarryAgentServiceRunning: Boolean;
@@ -228,16 +246,16 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
   begin
-    SetInstallerStatus('Preparing Harry Agent upgrade...');
+    SetInstallerBusyStatus('Preparing Harry Agent upgrade...');
     StopHarryAgentServiceForUpgrade();
   end;
 
   if CurStep = ssPostInstall then
   begin
     if BrainModePage.Values[1] then
-      SetInstallerStatus('Installing Harry Agent with the selected Brain address...')
+      SetInstallerBusyStatus('Installing Harry Agent with the selected Brain address...')
     else
-      SetInstallerStatus('Searching for Harry Brain...');
+      SetInstallerBusyStatus('Searching for Harry Brain...');
     RunInstallAgentScript();
   end;
 end;

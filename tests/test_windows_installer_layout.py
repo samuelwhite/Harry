@@ -88,13 +88,14 @@ def test_windows_agent_installer_sources_runtime_agent_package():
     assert "HarryAgentPayload" in agent_iss
     assert "CreateInputOptionPage" in agent_iss
     assert "CreateInputQueryPage" in agent_iss
-    assert "Automatic discovery (recommended)" in agent_iss
-    assert "Manual Brain address" in agent_iss
     assert "-InstallerMode" in agent_iss
     assert "-BrainUrl" in agent_iss
     assert "SW_HIDE" in agent_iss
+    assert "npbstMarquee" in agent_iss
     assert "WizardForm.StatusLabel.Caption" in agent_iss
     assert "Harry Agent installed successfully." in agent_iss
+    assert "SetInstallerBusyStatus" in agent_iss
+    assert "SetInstallerIdleStatus" in agent_iss
 
     assert "install_agent.ps1" in brain_iss
     assert "HarryAgentSetup.exe" not in brain_iss
