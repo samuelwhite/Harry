@@ -15,6 +15,10 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "Test-BrainDiscoveryCandidate" in text
         assert "Searching for Harry Brain" in text
         assert "Discovery candidates" in text
+        assert "Installer mode:" in text
+        assert "Automatic discovery (recommended)" in text
+        assert "Manual Brain address" in text
+        assert "HARRY_INSTALLER_MODE" in text
         assert "update_agent.ps1" in text
         assert "diagnose.ps1" in text
         assert "HARRY_PUBLIC_BASE_URL" in text
@@ -122,6 +126,8 @@ def test_windows_installer_logs_are_documented():
     assert "Configured Brain URL:" in diagnose
     assert "Service status:" in diagnose
     assert "Health / discovery test:" in diagnose
+    assert "discovery_skipped_manual_mode" in script
+    assert "Manual Brain address mode selected" in script
 
 
 def test_windows_installer_error_handling_and_exit_codes_are_explicit():
@@ -136,3 +142,11 @@ def test_windows_installer_error_handling_and_exit_codes_are_explicit():
     assert "ssPostInstall" in iss
     assert "Harry Agent installer failed" in iss or "failed" in iss.lower()
     assert "same_path_avoided" in script
+    assert "Automatic discovery (recommended)" in script
+    assert "Manual Brain address" in script
+    assert "HARRY_INSTALLER_MODE" in script
+    assert "Select-Object -First 1" in script
+    assert "return @($discovered)" in script
+    assert "return @($discovered)" in script
+    assert "Select-Object -First 1" in script
+    assert "Manual Brain address mode selected" in script

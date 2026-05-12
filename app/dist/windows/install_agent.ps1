@@ -63,6 +63,34 @@ function Get-DefaultBrainPort {
     return 8789
 }
 
+function Get-InstallerDiscoveryMode {
+    if (-not [string]::IsNullOrWhiteSpace($env:HARRY_INSTALLER_MODE)) {
+        switch -Regex ($env:HARRY_INSTALLER_MODE.Trim().ToLowerInvariant()) {
+            '^(automatic|auto)$' { return "automatic" }
+            '^(manual)$' { return "manual" }
+            '^(multi|automatic-multi|auto-multi)$' { return "automatic-multi" }
+        }
+    }
+
+    if ([Console]::IsInputRedirected) {
+        return "automatic"
+    }
+
+    Write-Host ""
+    Write-Host "Choose installer mode:"
+    Write-Host "  1) Automatic discovery (recommended)"
+    Write-Host "  2) Manual Brain address"
+    $choice = Read-Host "Installer mode [1]"
+    if ([string]::IsNullOrWhiteSpace($choice) -or $choice -eq "1") {
+        return "automatic"
+    }
+    if ($choice -eq "2") {
+        return "manual"
+    }
+
+    return "automatic"
+}
+
 function Invoke-ServiceCommand {
     param(
         [string]$Action
@@ -392,7 +420,8 @@ function Test-BrainDiscoveryCandidate {
 
 function Discover-HarryBrain {
     param (
-        [int]$Port
+        [int]$Port,
+        [switch]$MultiDiscovery
     )
 
     Write-Host "Searching for Harry Brain..."
@@ -409,6 +438,9 @@ function Discover-HarryBrain {
         if ($discovered -and $seen.Add($discovered)) {
             [void]$found.Add($discovered)
             Write-Host ("    discovered {0}" -f $discovered)
+            if (-not $MultiDiscovery) {
+                return @($discovered)
+            }
         }
     }
 
@@ -707,6 +739,11 @@ if ($HadExistingInstall) {
     Write-InstallLog "existing_service_stopped"
 }
 
+$InstallerMode = Get-InstallerDiscoveryMode
+$MultiDiscovery = $env:HARRY_INSTALLER_MULTI_DISCOVERY -match '^(1|true|yes)$'
+Write-Host "Installer mode: $InstallerMode"
+Write-InstallLog "installer_mode=$InstallerMode multi_discovery=$MultiDiscovery"
+
 Copy-InstallerPayloadFile -FileName "harry_agent.exe" -TargetPath $AgentExe
 Copy-InstallerPayloadFile -FileName "HarryAgentService.xml" -TargetPath $ServiceXml
 Copy-InstallerPayloadFile -FileName "HarryAgentService.exe" -TargetPath $ServiceExe
@@ -735,40 +772,59 @@ if (-not [string]::IsNullOrWhiteSpace($env:HARRY_PUBLIC_BASE_URL)) {
         Read-Host "Press Enter to exit"
         exit 1
     }
-} else {
+} elseif ($InstallerMode -eq "automatic" -or $InstallerMode -eq "automatic-multi") {
     $publicPort = Get-DefaultBrainPort
-    $discovered = Discover-HarryBrain -Port $publicPort
+    $discovered = @(Discover-HarryBrain -Port $publicPort -MultiDiscovery:($MultiDiscovery -or $InstallerMode -eq "automatic-multi"))
     Write-InstallLog ("discovery_candidates={0}" -f $discovered.Count)
 
-    if ($discovered.Count -eq 1) {
-        $brain = $discovered[0]
+    if ($discovered.Count -gt 0) {
+        $brain = $discovered | Select-Object -First 1
         Write-Host "Auto-discovered Harry Brain: $brain"
         Write-InstallLog "brain_source=discovery value=$brain"
-    } elseif ($discovered.Count -gt 1) {
-        if (-not (Test-IsAdmin)) {
-            Write-Host "Multiple Harry Brain instances were discovered, but the installer cannot prompt here." -ForegroundColor Yellow
-        }
-
-        Write-Host ""
-        Write-Host "Multiple Harry Brain instances were discovered:"
-        for ($i = 0; $i -lt $discovered.Count; $i++) {
-            Write-Host ("  {0}) {1}" -f ($i + 1), $discovered[$i])
-        }
-        Write-Host "  m) Enter a Brain address manually"
-        $choice = Read-Host "Choose a Brain [1]"
-        if ([string]::IsNullOrWhiteSpace($choice)) {
-            $choice = "1"
-        }
-
-        if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $discovered.Count) {
-            $brain = $discovered[[int]$choice - 1]
-            Write-InstallLog "brain_source=discovery_choice value=$brain"
-        }
     }
+} else {
+    Write-Host "Manual Brain address mode selected; discovery scan skipped."
+    Write-InstallLog "discovery_skipped_manual_mode"
 }
 
 if (-not $brain) {
-    if (-not [Console]::IsInputRedirected) {
+    if ($InstallerMode -eq "manual") {
+        if ([Console]::IsInputRedirected) {
+            Write-Host ""
+            Write-Host "ERROR: Manual Brain mode requires interactive input." -ForegroundColor Red
+            Write-InstallLog "brain_manual_mode_noninteractive"
+            exit 1
+        }
+
+        Write-Host ""
+        Write-Host "Enter the Brain address that other machines can reach."
+        Write-Host "Automatic discovery was skipped."
+        Write-Host "Examples:"
+        Write-Host "  192.168.1.100"
+        Write-Host "  192.168.1.100:8789"
+        Write-Host "  http://192.168.1.100:8789"
+        Write-Host ""
+        $brainInput = Read-Host "Harry Brain address"
+
+        if ([string]::IsNullOrWhiteSpace($brainInput)) {
+            Write-Host "ERROR: No Brain address provided." -ForegroundColor Red
+            Write-InstallLog "brain_prompt_cancelled"
+            Read-Host "Press Enter to exit"
+            exit 1
+        }
+
+        try {
+            $brain = Normalize-BrainUrl $brainInput
+            Write-InstallLog "brain_source=manual value=$brain"
+        } catch {
+            Write-Host ""
+            Write-Host "ERROR: Invalid Harry Brain address: $brainInput" -ForegroundColor Red
+            Write-InstallLog "brain_source=manual invalid"
+            Write-Host ""
+            Read-Host "Press Enter to exit"
+            exit 1
+        }
+    } elseif (-not [Console]::IsInputRedirected) {
         Write-Host ""
         Write-Host "No Brain was auto-discovered."
         Write-Host "Enter the Brain address that other machines can reach."
