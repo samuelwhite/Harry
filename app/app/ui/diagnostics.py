@@ -231,11 +231,7 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
 
     brain_rows = _advanced_discovery_rows(request)
     brain_address_text = next((text for label, _, text in brain_rows if label == "Brain Address"), "")
-    brain_message = (
-        brain_address_text
-        if "Could not determine" not in brain_address_text
-        else "Set HARRY_PUBLIC_BASE_URL or HARRY_BRAIN_LAN_IP so installers can find the Brain."
-    )
+    brain_message = brain_address_text if "Could not determine" not in brain_address_text else "Could not determine automatically."
     brain_status = "online" if "Could not determine" not in brain_address_text else "warning"
     installer_title, installer_status, installer_body = _installer_artifact_row()
     service_status = "ok" if not stale_n and not bad_n and not warn_n and not behind else "warn"

@@ -973,7 +973,7 @@ table.inv {
 }
 
 .compactcard {
-  padding: 0;
+  padding: 14px 16px;
   border-radius: 18px;
 }
 

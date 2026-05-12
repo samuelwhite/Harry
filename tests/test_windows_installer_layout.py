@@ -36,6 +36,8 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "Invoke-AgentOneShotSend" in text
         assert "Wait-FirstTelemetryResult" in text
         assert "Write-RuntimeMarker" in text
+        assert "one_shot_send_result" in text
+        assert "first_telemetry_marker_found" in text
         assert "Test-InstalledAgentState" in text
         assert "taskkill.exe" in text
         assert "sc.exe" in text

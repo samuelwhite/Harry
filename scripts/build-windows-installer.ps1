@@ -1,4 +1,5 @@
 param(
+    [string]$PythonExe = "python",
     [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 )
 
@@ -62,7 +63,7 @@ function Invoke-PythonJson {
     }
 
     try {
-        $result = & python -c $Command 2>&1
+        $result = & $PythonExe -c $Command 2>&1
         if ($LASTEXITCODE -ne 0) {
             $message = ($result | Out-String).Trim()
             throw "Failed to import app.versions or load app.ui.db while gathering Windows installer metadata.`n$message"
@@ -79,15 +80,58 @@ function Invoke-PythonJson {
     }
 }
 
+function Build-WindowsAgentExe {
+    param(
+        [string]$Root,
+        [string]$AgentSource,
+        [string]$AgentOutput
+    )
+
+    $buildRoot = Join-Path $Root "build/windows-agent"
+    $distDir = Join-Path $buildRoot "dist"
+    $workDir = Join-Path $buildRoot "work"
+    $specDir = Join-Path $buildRoot "spec"
+
+    New-Item -ItemType Directory -Force -Path $buildRoot, $distDir, $workDir, $specDir | Out-Null
+
+    Write-Host "Building Windows agent binary from $AgentSource"
+    Invoke-Checked $PythonExe @(
+        "-m", "PyInstaller",
+        "--noconfirm",
+        "--clean",
+        "--onefile",
+        "--name", "harry_agent",
+        "--distpath", $distDir,
+        "--workpath", $workDir,
+        "--specpath", $specDir,
+        $AgentSource
+    )
+
+    $builtExe = Join-Path $distDir "harry_agent.exe"
+    if (-not (Test-Path $builtExe)) {
+        throw "Windows agent build did not create $builtExe"
+    }
+
+    Copy-Item $builtExe $AgentOutput -Force
+    Write-Host "Windows agent binary: $AgentOutput"
+}
+
 $Root = (Resolve-Path $Root).Path
 $InstallerScript = Join-Path $Root "installers/windows/iss/HarryAgent.iss"
+$AgentSource = Join-Path $Root "agent/windows/harry_agent.py"
+$AgentOutput = Join-Path $Root "agent/windows/harry_agent.exe"
 $SyncScript = Join-Path $Root "scripts/sync_windows_artifacts.py"
 $DownloadDir = Join-Path $Root "downloads"
 $BuildDir = Join-Path $Root "build/windows-installer"
 $InstallerExe = Join-Path $BuildDir "HarryAgentSetup.exe"
 $InstallerManifest = Join-Path $DownloadDir "HarryAgentSetup.manifest.json"
 
-Invoke-Checked "python" @($SyncScript, "--root", $Root)
+if (-not (Test-Path $AgentSource)) {
+    throw "Windows agent source not found: $AgentSource"
+}
+
+Build-WindowsAgentExe -Root $Root -AgentSource $AgentSource -AgentOutput $AgentOutput
+Invoke-Checked $PythonExe @($SyncScript, "--root", $Root)
 
 New-Item -ItemType Directory -Force -Path $DownloadDir, $BuildDir | Out-Null
 

@@ -11,6 +11,8 @@ def test_windows_installer_release_script_describes_current_pipeline():
     release = Path("scripts/release-windows-installer.ps1").read_text(encoding="utf-8")
 
     assert "sync_windows_artifacts.py" in script
+    assert "PyInstaller" in script
+    assert "harry_agent.py" in script
     assert "ISCC.exe" in script
     assert "HarryAgent.iss" in script
     assert "HarryAgentSetup.exe" in script

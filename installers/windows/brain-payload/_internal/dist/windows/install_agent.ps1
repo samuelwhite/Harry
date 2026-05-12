@@ -296,6 +296,8 @@ function Get-SubnetCandidates {
         [int]$Port
     )
 
+    # Discovery only fans out across the active LAN subnet(s) derived from local IPv4
+    # adapters, so we probe nearby RFC1918 addresses instead of sweeping unrelated ranges.
     if ([string]::IsNullOrWhiteSpace($Ip)) {
         return @()
     }
@@ -625,11 +627,17 @@ function Invoke-AgentOneShotSend {
 
     if (-not (Test-Path $AgentExe)) {
         Write-InstallLog "one_shot_send_skipped reason=$Reason agent_missing"
-        return $false
+        return [pscustomobject]@{
+            Succeeded = $false
+            Unsupported = $false
+            ExitCode = $null
+            Output = "Agent executable missing"
+        }
     }
 
     Write-Host "Triggering one-shot telemetry send..."
-    Write-InstallLog "one_shot_send_attempt reason=$Reason brain=$BrainUrl agent=$AgentExe"
+    $validationCommand = "& `"$AgentExe`" --send-once"
+    Write-InstallLog "one_shot_send_attempt reason=$Reason brain=$BrainUrl agent=$AgentExe command=$validationCommand"
 
     $output = $null
     try {
@@ -645,11 +653,22 @@ function Invoke-AgentOneShotSend {
 
     if ($LASTEXITCODE -eq 0) {
         Write-InstallLog "one_shot_send_success exit_code=0"
-        return $true
+        return [pscustomobject]@{
+            Succeeded = $true
+            Unsupported = $false
+            ExitCode = 0
+            Output = $text
+        }
     }
 
     Write-InstallLog "one_shot_send_failure exit_code=$LASTEXITCODE"
-    return $false
+    $unsupported = [string]::IsNullOrWhiteSpace($text) -eq $false -and ($text -match '(?i)usage:\s+harry_agent\.exe' -or $text -match '(?i)unrecognized arguments?')
+    return [pscustomobject]@{
+        Succeeded = $false
+        Unsupported = $unsupported
+        ExitCode = $LASTEXITCODE
+        Output = $text
+    }
 }
 
 function Set-InstallerBusyStatus {
@@ -684,6 +703,7 @@ function Wait-FirstTelemetryResult {
     $marker = "install_validation_start session=$SessionId"
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $fallbackAttempted = $false
+    $markerFound = $false
     $seenMarker = $false
 
     Write-Host "Waiting for first telemetry send..."
@@ -702,12 +722,16 @@ function Wait-FirstTelemetryResult {
                 }
 
                 if ($line -match 'ingest_success') {
+                    $markerFound = $true
                     Write-InstallLog ("first_telemetry_success line={0}" -f $line)
+                    Write-InstallLog "first_telemetry_marker_found=true"
                     return
                 }
 
                 if ($line -match 'ingest_failure') {
+                    $markerFound = $true
                     Write-InstallLog ("first_telemetry_failure line={0}" -f $line)
+                    Write-InstallLog "first_telemetry_marker_found=true"
                     throw "First telemetry send failed. See $RuntimeLog"
                 }
             }
@@ -715,8 +739,14 @@ function Wait-FirstTelemetryResult {
 
         if (-not $fallbackAttempted -and (Get-Date) -ge $deadline.AddSeconds(-90)) {
             $fallbackAttempted = $true
-            if (Invoke-AgentOneShotSend -Reason "validation_fallback" -BrainUrl $BrainUrl) {
-                Write-InstallLog "first_telemetry_success via=send_once"
+            $validation = Invoke-AgentOneShotSend -Reason "validation_fallback" -BrainUrl $BrainUrl
+            Write-InstallLog "one_shot_send_result exit_code=$($validation.ExitCode) unsupported=$($validation.Unsupported)"
+            if ($validation.Unsupported) {
+                throw "Agent validation command is unsupported. See $RuntimeLog"
+            }
+
+            if ($validation.Succeeded) {
+                Write-InstallLog "first_telemetry_success via=send_once marker_found=$markerFound"
                 return
             }
 
@@ -727,8 +757,14 @@ function Wait-FirstTelemetryResult {
     }
 
     if (-not $fallbackAttempted) {
-        if (Invoke-AgentOneShotSend -Reason "validation_timeout" -BrainUrl $BrainUrl) {
-            Write-InstallLog "first_telemetry_success via=send_once_timeout_fallback"
+        $validation = Invoke-AgentOneShotSend -Reason "validation_timeout" -BrainUrl $BrainUrl
+        Write-InstallLog "one_shot_send_result exit_code=$($validation.ExitCode) unsupported=$($validation.Unsupported)"
+        if ($validation.Unsupported) {
+            throw "Agent validation command is unsupported. See $RuntimeLog"
+        }
+
+        if ($validation.Succeeded) {
+            Write-InstallLog "first_telemetry_success via=send_once_timeout_fallback marker_found=$markerFound"
             return
         }
     }

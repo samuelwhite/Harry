@@ -444,6 +444,7 @@ def test_discovery_diagnostics_section_shows_address_context(monkeypatch, tmp_pa
     assert "Container networking" in html
     assert "Discovery methods" in html
     assert "Installer address configured?" not in html
+    assert "Set HARRY_PUBLIC_BASE_URL" not in html[:html.index("Advanced diagnostics")]
 
 
 def test_api_page_lists_core_endpoints_and_examples():
