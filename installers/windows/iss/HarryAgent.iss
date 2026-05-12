@@ -21,10 +21,10 @@ SetupLogging=yes
 UninstallDisplayIcon={app}\HarryAgentService.exe
 
 [Files]
-Source: "..\..\..\app\dist\windows\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\..\app\dist\windows\*"; DestDir: "{tmp}\HarryAgentPayload"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Dirs]
-Name: "{app}"
+Name: "{tmp}\HarryAgentPayload"
 
 [UninstallRun]
 Filename: "{app}\HarryAgentService.exe"; Parameters: "stop"; Flags: runhidden skipifdoesntexist
@@ -47,7 +47,7 @@ var
   ResultCode: Integer;
   Params: string;
 begin
-  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\install_agent.ps1') + '"';
+  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\HarryAgentPayload\install_agent.ps1') + '"';
   Result := Exec(
     ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     Params,

@@ -46,6 +46,9 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "config.agent_version = $agentVersion" in text
         assert "Starting Harry Agent service..." in text
         assert "install_validation_success" in text
+        assert "payload_source=" in text
+        assert "install_target=" in text
+        assert "payload_copy_same_path_avoided" in text
         assert "Start-Transcript" in text
         assert "Stop-Transcript" in text
         assert "Press Enter to exit" in text
@@ -67,7 +70,7 @@ def test_windows_agent_installer_sources_runtime_agent_package():
     agent_iss = Path("installers/windows/iss/HarryAgent.iss").read_text(encoding="utf-8")
     brain_iss = Path("installers/windows/iss/HarryBrain.iss").read_text(encoding="utf-8")
 
-    assert "..\\..\\..\\app\\dist\\windows\\*" in agent_iss
+    assert "{tmp}\\HarryAgentPayload" in agent_iss
     assert "install_agent.ps1" in agent_iss
     assert "powershell.exe" in agent_iss
     assert "HarryAgentSetup.exe" not in agent_iss or "install_agent.ps1" in agent_iss
@@ -78,6 +81,7 @@ def test_windows_agent_installer_sources_runtime_agent_package():
     assert "ssPostInstall" in agent_iss
     assert "ResultCode" in agent_iss
     assert "Exec(" in agent_iss
+    assert "HarryAgentPayload" in agent_iss
 
     assert "install_agent.ps1" in brain_iss
     assert "HarryAgentSetup.exe" not in brain_iss
@@ -112,6 +116,8 @@ def test_windows_installer_logs_are_documented():
     assert "C:\\ProgramData\\Harry\\logs\\HarryAgentService.wrapper.log" in readme
     assert "Install log:" in script
     assert "Runtime log:" in script
+    assert "Payload source path:" in script
+    assert "Install target path:" in script
     assert "Installed files:" in diagnose
     assert "Configured Brain URL:" in diagnose
     assert "Service status:" in diagnose
@@ -129,3 +135,4 @@ def test_windows_installer_error_handling_and_exit_codes_are_explicit():
     assert "CurStepChanged" in iss
     assert "ssPostInstall" in iss
     assert "Harry Agent installer failed" in iss or "failed" in iss.lower()
+    assert "same_path_avoided" in script

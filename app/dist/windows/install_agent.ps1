@@ -566,6 +566,46 @@ function Write-InstallLog {
     }
 }
 
+function Copy-InstallerPayloadFile {
+    param(
+        [string]$FileName,
+        [string]$TargetPath
+    )
+
+    $SourcePath = Join-Path $scriptDir $FileName
+
+    if (-not (Test-Path $SourcePath)) {
+        Write-Host "ERROR: $FileName not found in the package folder."
+        Write-Host "Expected at: $SourcePath"
+        Write-InstallLog "missing_file $FileName source=$SourcePath target=$TargetPath"
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
+
+    Write-Host ("Payload source: {0}" -f $SourcePath)
+    Write-Host ("Install target: {0}" -f $TargetPath)
+    Write-InstallLog "payload_copy file=$FileName source=$SourcePath target=$TargetPath"
+
+    try {
+        $resolvedSource = (Resolve-Path -LiteralPath $SourcePath).Path
+        $resolvedTarget = $null
+        if (Test-Path -LiteralPath $TargetPath) {
+            $resolvedTarget = (Resolve-Path -LiteralPath $TargetPath).Path
+        }
+
+        if ($resolvedSource -and $resolvedTarget -and ($resolvedSource -ieq $resolvedTarget)) {
+            Write-Host ("Already staged: {0}" -f $FileName)
+            Write-InstallLog "payload_copy_same_path_avoided file=$FileName path=$resolvedTarget"
+            return
+        }
+    } catch {
+        Write-InstallLog "payload_copy_path_resolution_failed file=$FileName error=$($_.Exception.Message)"
+    }
+
+    Copy-Item $SourcePath $TargetPath -Force
+    Write-InstallLog "payload_copy_complete file=$FileName"
+}
+
 function Run-AgentOnce {
     Write-Host "Running one-shot telemetry send..."
     Write-InstallLog "agent_once_start"
@@ -642,8 +682,12 @@ Write-Host ""
 Write-Host "Installing Harry Agent to $InstallRoot ..."
 Write-Host "Installer source folder: $scriptDir"
 Write-Host ("Existing install detected: {0}" -f ($(if ($HadExistingInstall) { "yes" } else { "no" })))
+Write-Host "Payload source path: $scriptDir"
+Write-Host "Install target path: $InstallRoot"
 Write-Host "Install log: $InstallLog"
 Write-Host "Runtime log: $RuntimeLog"
+Write-InstallLog "payload_source=$scriptDir"
+Write-InstallLog "install_target=$InstallRoot"
 Write-InstallLog "installer_start existing_install=$HadExistingInstall source=$scriptDir"
 Write-Host ""
 
@@ -663,55 +707,11 @@ if ($HadExistingInstall) {
     Write-InstallLog "existing_service_stopped"
 }
 
-if (Test-Path ".\harry_agent.exe") {
-    Copy-Item ".\harry_agent.exe" $AgentExe -Force
-} else {
-    Write-Host "ERROR: harry_agent.exe not found in the package folder."
-    Write-Host "Expected at: $scriptDir\harry_agent.exe"
-    Write-InstallLog "missing_file harry_agent.exe"
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-if (Test-Path ".\HarryAgentService.xml") {
-    Copy-Item ".\HarryAgentService.xml" $ServiceXml -Force
-} else {
-    Write-Host "ERROR: HarryAgentService.xml not found in the package folder."
-    Write-Host "Expected at: $scriptDir\HarryAgentService.xml"
-    Write-InstallLog "missing_file HarryAgentService.xml"
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-if (Test-Path ".\HarryAgentService.exe") {
-    Copy-Item ".\HarryAgentService.exe" $ServiceExe -Force
-} else {
-    Write-Host "ERROR: HarryAgentService.exe not found in the package folder."
-    Write-Host "Expected at: $scriptDir\HarryAgentService.exe"
-    Write-InstallLog "missing_file HarryAgentService.exe"
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-if (Test-Path ".\update_agent.ps1") {
-    Copy-Item ".\update_agent.ps1" $UpdaterScript -Force
-} else {
-    Write-Host "ERROR: update_agent.ps1 not found in the package folder."
-    Write-Host "Expected at: $scriptDir\update_agent.ps1"
-    Write-InstallLog "missing_file update_agent.ps1"
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-if (Test-Path ".\diagnose.ps1") {
-    Copy-Item ".\diagnose.ps1" $DiagnoseScript -Force
-} else {
-    Write-Host "ERROR: diagnose.ps1 not found in the package folder."
-    Write-Host "Expected at: $scriptDir\diagnose.ps1"
-    Write-InstallLog "missing_file diagnose.ps1"
-    Read-Host "Press Enter to exit"
-    exit 1
-}
+Copy-InstallerPayloadFile -FileName "harry_agent.exe" -TargetPath $AgentExe
+Copy-InstallerPayloadFile -FileName "HarryAgentService.xml" -TargetPath $ServiceXml
+Copy-InstallerPayloadFile -FileName "HarryAgentService.exe" -TargetPath $ServiceExe
+Copy-InstallerPayloadFile -FileName "update_agent.ps1" -TargetPath $UpdaterScript
+Copy-InstallerPayloadFile -FileName "diagnose.ps1" -TargetPath $DiagnoseScript
 
 Write-Host ""
 Write-Host "Enter the Harry Brain address."
