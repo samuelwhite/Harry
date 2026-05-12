@@ -39,7 +39,7 @@ Quick Start
 
    .\install_agent.ps1
 
-5. Enter the Harry Brain address when prompted.
+5. Choose automatic discovery or enter a manual Harry Brain address in the installer.
 
 
 Example Brain URL
@@ -69,6 +69,14 @@ Log files are written to:
 
 C:\ProgramData\Harry
 
+The main install log is:
+
+C:\ProgramData\Harry\logs\HarryAgent.install.log
+
+The runtime log is:
+
+C:\ProgramData\Harry\logs\HarryAgent.runtime.log
+
 Important logs:
 
 HarryAgentService.wrapper.log
@@ -81,6 +89,10 @@ Diagnostics
 To print a safe local summary of the installed agent, run:
 
   C:\ProgramData\Harry\harry_agent.exe --diagnostics
+
+To send one telemetry payload and exit, run:
+
+  C:\ProgramData\Harry\harry_agent.exe --send-once
 
 To confirm the installed version, run:
 

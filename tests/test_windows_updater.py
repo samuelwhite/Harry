@@ -120,15 +120,29 @@ def test_windows_agent_diagnostics_flag_prints_summary(monkeypatch, capsys):
     assert data["ingest_probe_ok"] is True
 
 
-def test_windows_agent_once_flag_runs_single_send(monkeypatch):
+def test_windows_agent_send_once_flag_runs_single_send(monkeypatch):
     win_agent = _load_windows_agent(monkeypatch)
     calls = []
-    monkeypatch.setattr(sys, "argv", ["harry_agent.py", "--once"])
+    monkeypatch.setattr(sys, "argv", ["harry_agent.py", "--send-once"])
     monkeypatch.setattr(win_agent, "run_once", lambda: calls.append("run") or 0)
 
     try:
         win_agent.main()
     except SystemExit as exc:
         assert exc.code == 0
+
+    assert calls == ["run"]
+
+
+def test_windows_agent_once_flag_still_runs_single_send(monkeypatch):
+    win_agent = _load_windows_agent(monkeypatch)
+    calls = []
+    monkeypatch.setattr(sys, "argv", ["harry_agent.py", "--once"])
+    monkeypatch.setattr(win_agent, "run_once", lambda: calls.append("run") or 1)
+
+    try:
+        win_agent.main()
+    except SystemExit as exc:
+        assert exc.code == 1
 
     assert calls == ["run"]

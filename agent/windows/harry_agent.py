@@ -725,26 +725,26 @@ def build_payload() -> dict:
     return payload
 
 
-def send(payload: dict) -> None:
+def send(payload: dict) -> bool:
     ok, status, body = _probe_ingest(payload)
     if ok:
         message = f"Sent OK: HTTP {status} {body}"
         print(message)
         write_runtime_log(f"ingest_success status={status} endpoint={ENDPOINT}")
-        return
+        return True
 
     message = f"Failed to send: {body}" if status is None else f"HTTP error: {status} {body}"
     print(message)
     write_runtime_log(
         f"ingest_failure status={status if status is not None else 'unknown'} endpoint={ENDPOINT} error={body}"
     )
+    return False
 
 
 def run_once() -> int:
     payload = build_payload()
     print("Sending payload for node:", payload["node"])
-    send(payload)
-    return 0
+    return 0 if send(payload) else 1
 
 
 def build_diagnostics_summary() -> dict:
@@ -793,6 +793,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--once",
+        "--send-once",
+        dest="once",
         action="store_true",
         help="Send one telemetry payload and exit.",
     )

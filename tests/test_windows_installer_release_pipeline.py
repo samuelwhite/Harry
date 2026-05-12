@@ -74,4 +74,5 @@ def test_windows_installer_manifest_is_expected_runtime_name():
     assert "C:\\ProgramData\\Harry\\logs\\HarryAgent.runtime.log" in readme
     assert "C:\\ProgramData\\Harry\\diagnose.ps1" in readme
     assert "--diagnostics" in readme
+    assert "--send-once" in readme
     assert "--once" in readme

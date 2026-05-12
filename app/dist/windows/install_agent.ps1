@@ -1,3 +1,10 @@
+param(
+    [ValidateSet("automatic", "manual", "automatic-multi")]
+    [string]$InstallerMode = "",
+    [string]$BrainUrl = "",
+    [switch]$DebugInstaller
+)
+
 $ErrorActionPreference = "Stop"
 
 function Test-IsAdmin {
@@ -64,6 +71,10 @@ function Get-DefaultBrainPort {
 }
 
 function Get-InstallerDiscoveryMode {
+    if (-not [string]::IsNullOrWhiteSpace($InstallerMode)) {
+        return $InstallerMode
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($env:HARRY_INSTALLER_MODE)) {
         switch -Regex ($env:HARRY_INSTALLER_MODE.Trim().ToLowerInvariant()) {
             '^(automatic|auto)$' { return "automatic" }
@@ -72,23 +83,19 @@ function Get-InstallerDiscoveryMode {
         }
     }
 
-    if ([Console]::IsInputRedirected) {
-        return "automatic"
-    }
-
-    Write-Host ""
-    Write-Host "Choose installer mode:"
-    Write-Host "  1) Automatic discovery (recommended)"
-    Write-Host "  2) Manual Brain address"
-    $choice = Read-Host "Installer mode [1]"
-    if ([string]::IsNullOrWhiteSpace($choice) -or $choice -eq "1") {
-        return "automatic"
-    }
-    if ($choice -eq "2") {
-        return "manual"
-    }
-
     return "automatic"
+}
+
+function Get-InstallerBrainUrl {
+    if (-not [string]::IsNullOrWhiteSpace($BrainUrl)) {
+        return $BrainUrl
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:HARRY_INSTALLER_BRAIN_URL)) {
+        return $env:HARRY_INSTALLER_BRAIN_URL
+    }
+
+    return $null
 }
 
 function Invoke-ServiceCommand {
@@ -584,6 +591,7 @@ $UpdaterScript = Join-Path $InstallRoot "update_agent.ps1"
 $WrapperLog = Join-Path $InstallRoot "HarryAgentService.wrapper.log"
 $OutLog = Join-Path $InstallRoot "HarryAgentService.out.log"
 $ErrLog = Join-Path $InstallRoot "HarryAgentService.err.log"
+$InstallSessionId = [guid]::NewGuid().ToString()
 $HadExistingInstall = (Test-Path $AgentExe) -or (Test-Path $ServiceExe) -or (Test-Path $ServiceXml) -or (Test-Path $ConfigPath)
 $TranscriptStarted = $false
 
@@ -598,6 +606,60 @@ function Write-InstallLog {
     }
 }
 
+function Write-RuntimeMarker {
+    param([string]$Message)
+
+    try {
+        New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+        $ts = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        Add-Content -Path $RuntimeLog -Value "[$ts] $Message" -Encoding UTF8
+    } catch {
+    }
+}
+
+function Wait-FirstTelemetryResult {
+    param(
+        [string]$SessionId,
+        [int]$TimeoutSeconds = 60
+    )
+
+    $marker = "install_validation_start session=$SessionId"
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $seenMarker = $false
+
+    Write-Host "Waiting for first telemetry send..."
+    Write-InstallLog "validation_wait_for_first_send session=$SessionId timeout_seconds=$TimeoutSeconds"
+
+    while ((Get-Date) -lt $deadline) {
+        if (Test-Path $RuntimeLog) {
+            $lines = @(Get-Content -Path $RuntimeLog -Tail 120 -ErrorAction SilentlyContinue)
+            foreach ($line in $lines) {
+                if (-not $seenMarker) {
+                    if ($line -match [regex]::Escape($marker)) {
+                        $seenMarker = $true
+                        Write-InstallLog "runtime_marker_seen session=$SessionId"
+                    }
+                    continue
+                }
+
+                if ($line -match 'ingest_success') {
+                    Write-InstallLog ("first_telemetry_success line={0}" -f $line)
+                    return
+                }
+
+                if ($line -match 'ingest_failure') {
+                    Write-InstallLog ("first_telemetry_failure line={0}" -f $line)
+                    throw "First telemetry send failed. See $RuntimeLog"
+                }
+            }
+        }
+
+        Start-Sleep -Seconds 2
+    }
+
+    throw "Timed out waiting for first telemetry send. See $RuntimeLog"
+}
+
 function Copy-InstallerPayloadFile {
     param(
         [string]$FileName,
@@ -610,7 +672,6 @@ function Copy-InstallerPayloadFile {
         Write-Host "ERROR: $FileName not found in the package folder."
         Write-Host "Expected at: $SourcePath"
         Write-InstallLog "missing_file $FileName source=$SourcePath target=$TargetPath"
-        Read-Host "Press Enter to exit"
         exit 1
     }
 
@@ -636,28 +697,6 @@ function Copy-InstallerPayloadFile {
 
     Copy-Item $SourcePath $TargetPath -Force
     Write-InstallLog "payload_copy_complete file=$FileName"
-}
-
-function Run-AgentOnce {
-    Write-Host "Running one-shot telemetry send..."
-    Write-InstallLog "agent_once_start"
-
-    $output = & $AgentExe --once 2>&1
-    $exitCode = $LASTEXITCODE
-
-    if ($output) {
-        $output | ForEach-Object {
-            Write-Host $_
-            Write-InstallLog ("agent_once_output {0}" -f $_)
-        }
-    }
-
-    if ($exitCode -ne 0) {
-        Write-InstallLog "agent_once_failed exit_code=$exitCode"
-        throw "Windows agent did not complete its first telemetry send."
-    }
-
-    Write-InstallLog "agent_once_success exit_code=$exitCode"
 }
 
 function Test-InstalledAgentState {
@@ -700,6 +739,10 @@ function Test-InstalledAgentState {
 
     if ([string]::IsNullOrWhiteSpace($ExpectedAgentVersion)) {
         $issues.Add("agent version could not be read")
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedAgentVersion) -and $config.agent_version -and ($config.agent_version -ne $ExpectedAgentVersion)) {
+        $issues.Add("agent_version mismatch (config=$($config.agent_version); expected=$ExpectedAgentVersion)")
     }
 
     if ($issues.Count -gt 0) {
@@ -750,27 +793,20 @@ Copy-InstallerPayloadFile -FileName "HarryAgentService.exe" -TargetPath $Service
 Copy-InstallerPayloadFile -FileName "update_agent.ps1" -TargetPath $UpdaterScript
 Copy-InstallerPayloadFile -FileName "diagnose.ps1" -TargetPath $DiagnoseScript
 
+$brain = $null
 Write-Host ""
-Write-Host "Enter the Harry Brain address."
-Write-Host "This is the full address of the machine running Harry Brain."
-Write-Host "Examples:"
-Write-Host "  192.168.1.100"
-Write-Host "  192.168.1.100:8789"
-Write-Host "  http://192.168.1.100:8789"
+Write-Host "Connection mode: $InstallerMode"
+Write-Host "Automatic discovery will search the local network for Harry Brain unless manual mode was selected."
 Write-Host ""
 
-$brain = $null
 if (-not [string]::IsNullOrWhiteSpace($env:HARRY_PUBLIC_BASE_URL)) {
     try {
         $brain = Normalize-BrainUrl $env:HARRY_PUBLIC_BASE_URL
         Write-Host "Using HARRY_PUBLIC_BASE_URL: $brain"
         Write-InstallLog "brain_source=env value=$brain"
     } catch {
-        Write-Host ""
-        Write-Host "ERROR: HARRY_PUBLIC_BASE_URL is invalid." -ForegroundColor Red
         Write-InstallLog "brain_source=env invalid"
-        Read-Host "Press Enter to exit"
-        exit 1
+        throw "HARRY_PUBLIC_BASE_URL is invalid."
     }
 } elseif ($InstallerMode -eq "automatic" -or $InstallerMode -eq "automatic-multi") {
     $publicPort = Get-DefaultBrainPort
@@ -778,9 +814,12 @@ if (-not [string]::IsNullOrWhiteSpace($env:HARRY_PUBLIC_BASE_URL)) {
     Write-InstallLog ("discovery_candidates={0}" -f $discovered.Count)
 
     if ($discovered.Count -gt 0) {
-        $brain = $discovered | Select-Object -First 1
+        $brain = [string](@($discovered)[0])
         Write-Host "Auto-discovered Harry Brain: $brain"
         Write-InstallLog "brain_source=discovery value=$brain"
+    } else {
+        Write-Host "No Harry Brain was auto-discovered."
+        Write-InstallLog "brain_auto_discovery_no_results"
     }
 } else {
     Write-Host "Manual Brain address mode selected; discovery scan skipped."
@@ -789,88 +828,30 @@ if (-not [string]::IsNullOrWhiteSpace($env:HARRY_PUBLIC_BASE_URL)) {
 
 if (-not $brain) {
     if ($InstallerMode -eq "manual") {
-        if ([Console]::IsInputRedirected) {
-            Write-Host ""
-            Write-Host "ERROR: Manual Brain mode requires interactive input." -ForegroundColor Red
-            Write-InstallLog "brain_manual_mode_noninteractive"
-            exit 1
-        }
-
-        Write-Host ""
-        Write-Host "Enter the Brain address that other machines can reach."
-        Write-Host "Automatic discovery was skipped."
-        Write-Host "Examples:"
-        Write-Host "  192.168.1.100"
-        Write-Host "  192.168.1.100:8789"
-        Write-Host "  http://192.168.1.100:8789"
-        Write-Host ""
-        $brainInput = Read-Host "Harry Brain address"
-
-        if ([string]::IsNullOrWhiteSpace($brainInput)) {
-            Write-Host "ERROR: No Brain address provided." -ForegroundColor Red
+        $manualBrain = Get-InstallerBrainUrl
+        if ([string]::IsNullOrWhiteSpace($manualBrain)) {
             Write-InstallLog "brain_prompt_cancelled"
-            Read-Host "Press Enter to exit"
-            exit 1
+            throw "Manual Brain address was not provided."
         }
 
         try {
-            $brain = Normalize-BrainUrl $brainInput
+            $brain = Normalize-BrainUrl $manualBrain
             Write-InstallLog "brain_source=manual value=$brain"
         } catch {
-            Write-Host ""
-            Write-Host "ERROR: Invalid Harry Brain address: $brainInput" -ForegroundColor Red
-            Write-InstallLog "brain_source=manual invalid"
-            Write-Host ""
-            Read-Host "Press Enter to exit"
-            exit 1
-        }
-    } elseif (-not [Console]::IsInputRedirected) {
-        Write-Host ""
-        Write-Host "No Brain was auto-discovered."
-        Write-Host "Enter the Brain address that other machines can reach."
-        Write-Host "Examples:"
-        Write-Host "  192.168.1.100"
-        Write-Host "  192.168.1.100:8789"
-        Write-Host "  http://192.168.1.100:8789"
-        Write-Host ""
-        $brainInput = Read-Host "Harry Brain address"
-
-        if ([string]::IsNullOrWhiteSpace($brainInput)) {
-            Write-Host "ERROR: No Brain address provided." -ForegroundColor Red
-            Write-InstallLog "brain_prompt_cancelled"
-            Read-Host "Press Enter to exit"
-            exit 1
-        }
-
-        try {
-            $brain = Normalize-BrainUrl $brainInput
-            Write-InstallLog "brain_source=manual value=$brain"
-        } catch {
-            Write-Host ""
-            Write-Host "ERROR: Invalid Harry Brain address: $brainInput" -ForegroundColor Red
-            Write-InstallLog "brain_source=manual invalid"
-            Write-Host ""
-            Read-Host "Press Enter to exit"
-            exit 1
+            Write-InstallLog "brain_source=manual invalid value=$manualBrain"
+            throw "Invalid Harry Brain address: $manualBrain"
         }
     } else {
-        Write-Host ""
-        Write-Host "ERROR: Harry Brain could not be auto-discovered in non-interactive mode." -ForegroundColor Red
-        Write-Host "Set the Brain address manually and rerun the installer." -ForegroundColor Yellow
         Write-InstallLog "brain_auto_discovery_failed_noninteractive"
-        exit 1
+        throw "Harry Brain could not be auto-discovered. Re-run the installer and choose Manual Brain address."
     }
-} else {
-    try {
-        $brain = Normalize-BrainUrl $brain
-    } catch {
-        Write-Host ""
-        Write-Host "ERROR: Invalid discovered Harry Brain address: $brain" -ForegroundColor Red
-        Write-InstallLog "brain_source=discovery invalid"
-        Write-Host ""
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
+}
+
+try {
+    $brain = Normalize-BrainUrl $brain
+} catch {
+    Write-InstallLog "brain_source=normalized_invalid value=$brain"
+    throw "Invalid Harry Brain address: $brain"
 }
 
 try {
@@ -881,12 +862,8 @@ try {
     $brain = $verified
     Write-InstallLog "brain_verified=$brain"
 } catch {
-    Write-Host ""
-    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
     Write-InstallLog "brain_verification_failed error=$($_.Exception.Message)"
-    Write-Host ""
-    Read-Host "Press Enter to exit"
-    exit 1
+    throw
 }
 
 $config = @{}
@@ -952,14 +929,13 @@ Write-Host "Verifying installed agent..."
 Write-Host "Agent version: $agentVersion"
 Write-Host "Service registration: $serviceState"
 
+Write-RuntimeMarker "install_validation_start session=$InstallSessionId brain=$brain"
+
 try {
-    Run-AgentOnce
+    Wait-FirstTelemetryResult -SessionId $InstallSessionId -TimeoutSeconds 60
 } catch {
-    Write-Host ""
-    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
     Write-InstallLog "initial_send_failed error=$($_.Exception.Message)"
-    Read-Host "Press Enter to exit"
-    exit 1
+    throw
 }
 
 Write-Host ""
@@ -996,18 +972,13 @@ Write-Host ""
 try {
     Test-InstalledAgentState -ConfiguredBrainUrl $brain -ExpectedAgentVersion $agentVersion
 } catch {
-    Write-Host ""
-    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
     Write-InstallLog "post_install_validation_failed error=$($_.Exception.Message)"
     if ($TranscriptStarted) {
         try { Stop-Transcript | Out-Null } catch { }
     }
-    Read-Host "Press Enter to exit"
-    exit 1
+    throw
 }
 
 if ($TranscriptStarted) {
     try { Stop-Transcript | Out-Null } catch { }
 }
-
-Read-Host "Press Enter to exit"

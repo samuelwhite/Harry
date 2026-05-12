@@ -19,7 +19,7 @@ Installation
 
    .\install_agent.ps1
 
-5. When prompted, enter the Harry Brain address.
+5. Choose automatic discovery or enter a manual Harry Brain address in the installer.
 
 Example:
 http://192.168.1.100:8789
@@ -60,6 +60,12 @@ Log files
 Wrapper log
 C:\ProgramData\Harry\HarryAgentService.wrapper.log
 
+Install log
+C:\ProgramData\Harry\logs\HarryAgent.install.log
+
+Runtime log
+C:\ProgramData\Harry\logs\HarryAgent.runtime.log
+
 Agent output
 C:\ProgramData\Harry\HarryAgentService.out.log
 
@@ -72,6 +78,10 @@ Diagnostics
 Run this to print a safe local summary:
 
   C:\ProgramData\Harry\harry_agent.exe --diagnostics
+
+Run this to send one payload and exit:
+
+  C:\ProgramData\Harry\harry_agent.exe --send-once
 
 Run this to confirm the installed version:
 

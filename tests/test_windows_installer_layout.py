@@ -16,8 +16,6 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "Searching for Harry Brain" in text
         assert "Discovery candidates" in text
         assert "Installer mode:" in text
-        assert "Automatic discovery (recommended)" in text
-        assert "Manual Brain address" in text
         assert "HARRY_INSTALLER_MODE" in text
         assert "update_agent.ps1" in text
         assert "diagnose.ps1" in text
@@ -27,9 +25,7 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "/discover" in text
         assert "/.well-known/harry-brain" in text
         assert "8789" in text
-        assert "No Brain was auto-discovered." in text
         assert "Harry Brain address" in text
-        assert "ERROR: No Brain address provided." in text
         assert "brain_auto_discovery_failed_noninteractive" in text
         assert "Stop-HarryAgentService" in text
         assert "Invoke-TaskKillBestEffort" in text
@@ -37,7 +33,8 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "Wait-HarryAgentServiceProcessStart" in text
         assert "Test-HarryAgentServiceRunning" in text
         assert "Start-HarryAgentService" in text
-        assert "Run-AgentOnce" in text
+        assert "Wait-FirstTelemetryResult" in text
+        assert "Write-RuntimeMarker" in text
         assert "Test-InstalledAgentState" in text
         assert "taskkill.exe" in text
         assert "sc.exe" in text
@@ -55,7 +52,10 @@ def test_windows_installer_mentions_brain_discovery_and_public_port():
         assert "payload_copy_same_path_avoided" in text
         assert "Start-Transcript" in text
         assert "Stop-Transcript" in text
-        assert "Press Enter to exit" in text
+        assert "installer_mode=$InstallerMode" in text
+        assert "install_validation_start session=" in text
+        assert "first_telemetry_success" in text
+        assert "Harry Agent installed successfully." in text
 
 
 def test_windows_installer_examples_are_public_and_generic():
@@ -86,6 +86,15 @@ def test_windows_agent_installer_sources_runtime_agent_package():
     assert "ResultCode" in agent_iss
     assert "Exec(" in agent_iss
     assert "HarryAgentPayload" in agent_iss
+    assert "CreateInputOptionPage" in agent_iss
+    assert "CreateInputQueryPage" in agent_iss
+    assert "Automatic discovery (recommended)" in agent_iss
+    assert "Manual Brain address" in agent_iss
+    assert "-InstallerMode" in agent_iss
+    assert "-BrainUrl" in agent_iss
+    assert "SW_HIDE" in agent_iss
+    assert "WizardForm.StatusLabel.Caption" in agent_iss
+    assert "Harry Agent installed successfully." in agent_iss
 
     assert "install_agent.ps1" in brain_iss
     assert "HarryAgentSetup.exe" not in brain_iss
@@ -128,6 +137,10 @@ def test_windows_installer_logs_are_documented():
     assert "Health / discovery test:" in diagnose
     assert "discovery_skipped_manual_mode" in script
     assert "Manual Brain address mode selected" in script
+    assert "connection mode" in script.lower()
+    assert "Waiting for first telemetry send" in script
+    assert "install_validation_start session=" in script
+    assert "first_telemetry_success" in script
 
 
 def test_windows_installer_error_handling_and_exit_codes_are_explicit():
@@ -142,11 +155,11 @@ def test_windows_installer_error_handling_and_exit_codes_are_explicit():
     assert "ssPostInstall" in iss
     assert "Harry Agent installer failed" in iss or "failed" in iss.lower()
     assert "same_path_avoided" in script
-    assert "Automatic discovery (recommended)" in script
-    assert "Manual Brain address" in script
     assert "HARRY_INSTALLER_MODE" in script
     assert "Select-Object -First 1" in script
     assert "return @($discovered)" in script
     assert "return @($discovered)" in script
     assert "Select-Object -First 1" in script
     assert "Manual Brain address mode selected" in script
+    assert "Run-AgentOnce" not in script
+    assert "Press Enter to exit" not in script

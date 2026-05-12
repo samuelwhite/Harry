@@ -95,11 +95,13 @@ Windows install logs are written to:
 `C:\ProgramData\Harry\logs\HarryAgentService.err.log`
 `C:\ProgramData\Harry\diagnose.ps1`
 
-After install, the Windows agent runs a one-shot telemetry send automatically.
+During install, the Windows wizard lets you choose automatic discovery or a manual Brain address.
+After install, the Windows agent validates its first telemetry send automatically.
 For local diagnostics on an installed machine:
 
 `C:\ProgramData\Harry\diagnose.ps1`
 `C:\ProgramData\Harry\harry_agent.exe --diagnostics`
+`C:\ProgramData\Harry\harry_agent.exe --send-once`
 `C:\ProgramData\Harry\harry_agent.exe --once`
 
 ---
