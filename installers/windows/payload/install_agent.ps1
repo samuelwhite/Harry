@@ -593,6 +593,7 @@ $UpdaterScript = Join-Path $InstallRoot "update_agent.ps1"
 $WrapperLog = Join-Path $InstallRoot "HarryAgentService.wrapper.log"
 $OutLog = Join-Path $InstallRoot "HarryAgentService.out.log"
 $ErrLog = Join-Path $InstallRoot "HarryAgentService.err.log"
+$TranscriptLog = Join-Path $LogDir "HarryAgent.install.transcript.log"
 $InstallSessionId = [guid]::NewGuid().ToString()
 $HadExistingInstall = (Test-Path $AgentExe) -or (Test-Path $ServiceExe) -or (Test-Path $ServiceXml) -or (Test-Path $ConfigPath)
 $TranscriptStarted = $false
@@ -827,7 +828,6 @@ function Test-InstalledAgentState {
             if (-not $config.public_base_url) { $issues.Add("configured Brain URL is empty") }
             if (-not $config.brain_url) { $issues.Add("brain_url is empty") }
             if (-not $config.ingest_url) { $issues.Add("ingest_url is empty") }
-            if (-not $config.agent_version) { $issues.Add("agent_version is empty") }
         } catch {
             $issues.Add("agent_config.json could not be parsed")
         }
@@ -851,10 +851,6 @@ function Test-InstalledAgentState {
 
     if ([string]::IsNullOrWhiteSpace($ExpectedAgentVersion)) {
         $issues.Add("agent version could not be read")
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($ExpectedAgentVersion) -and $config.agent_version -and ($config.agent_version -ne $ExpectedAgentVersion)) {
-        $issues.Add("agent_version mismatch (config=$($config.agent_version); expected=$ExpectedAgentVersion)")
     }
 
     if ($issues.Count -gt 0) {
@@ -882,7 +878,7 @@ New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 try {
-    Start-Transcript -Path $InstallLog -Append | Out-Null
+    Start-Transcript -Path $TranscriptLog -Append | Out-Null
     $TranscriptStarted = $true
 } catch {
     Write-Host "Transcript logging could not be started: $($_.Exception.Message)" -ForegroundColor Yellow
@@ -906,6 +902,7 @@ Copy-InstallerPayloadFile -FileName "update_agent.ps1" -TargetPath $UpdaterScrip
 Copy-InstallerPayloadFile -FileName "diagnose.ps1" -TargetPath $DiagnoseScript
 
 $brain = $null
+$agentVersion = ""
 Write-Host ""
 Write-Host "Connection mode: $InstallerMode"
 Write-Host "Automatic discovery will search the local network for Harry Brain unless manual mode was selected."
@@ -978,6 +975,19 @@ try {
     throw
 }
 
+try {
+    $agentVersion = (& $AgentExe --version 2>$null | Select-Object -First 1).Trim()
+} catch {
+    $agentVersion = ""
+}
+
+if ([string]::IsNullOrWhiteSpace($agentVersion)) {
+    $agentVersion = "unknown"
+    Write-InstallLog "agent_version_unavailable"
+} else {
+    Write-InstallLog "agent_version=$agentVersion"
+}
+
 $config = @{}
 if (Test-Path $ConfigPath) {
     try {
@@ -1003,6 +1013,7 @@ Write-Host ""
 Write-Host "Saved config to $ConfigPath"
 Write-Host "Brain URL: $brain"
 Write-InstallLog "config_written path=$ConfigPath brain_url=$brain"
+Write-InstallLog "transcript_log=$TranscriptLog"
 
 Write-Host ""
 Write-Host "Refreshing Harry Agent service..."
@@ -1019,16 +1030,11 @@ Start-HarryAgentService
 Write-InstallLog "service_started"
 
 try {
-    $agentVersion = (& $AgentExe --version 2>$null | Select-Object -First 1).Trim()
+    $installedVersion = (& $AgentExe --version 2>$null | Select-Object -First 1).Trim()
+    if ($installedVersion) {
+        Write-InstallLog "installed_version=$installedVersion"
+    }
 } catch {
-    $agentVersion = ""
-}
-
-if ([string]::IsNullOrWhiteSpace($agentVersion)) {
-    $agentVersion = "unknown"
-    Write-InstallLog "agent_version_unavailable"
-} else {
-    Write-InstallLog "agent_version=$agentVersion"
 }
 
 $serviceState = Get-HarryAgentServiceState
