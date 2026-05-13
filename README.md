@@ -61,7 +61,7 @@ To verify the installer path:
 
 `downloads/HarryAgentSetup.exe`
 
-The installer should reflect Brain `2026.05.09`, Agent `0.2.5`, and Schema `0.2.3`.
+The installer should reflect Brain `2026.05.15`, Agent `0.2.5`, and Schema `0.2.3`.
 
 Harry’s stable Windows installer artifacts are committed in `downloads/`, so a normal `git pull` or `update-harry` refreshes them with the repo.
 

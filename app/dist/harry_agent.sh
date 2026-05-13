@@ -7,7 +7,7 @@ set -euo pipefail
 
 AGENT_VERSION="0.2.5"
 SCHEMA_VERSION="0.2.3"
-BRAIN_VERSION="2026.05.09"
+BRAIN_VERSION="2026.05.15"
 
 CURL="${CURL:-/usr/bin/curl}"
 PYTHON="${PYTHON:-python3}"

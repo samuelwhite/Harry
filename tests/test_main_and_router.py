@@ -148,7 +148,7 @@ def test_discover_endpoint_reports_brain_identity(monkeypatch, tmp_path):
     assert data["ok"] is True
     assert data["service"] == "harry-brain"
     assert data["display_name"] == "Harry Brain"
-    assert data["brain_version"] == "2026.05.09"
+    assert data["brain_version"] == "2026.05.15"
     assert data["agent_version"] == "0.2.5"
     assert data["schema_current"] == "0.2.3"
     assert data["canonical_base_url"] == "http://brain.example:8789"
@@ -182,7 +182,7 @@ def test_downloads_exposes_windows_agent_setup(monkeypatch, tmp_path):
         json.dumps(
             {
                 "installer_name": "HarryAgentSetup.exe",
-                "brain_version": "2026.05.09",
+                "brain_version": "2026.05.15",
                 "agent_version": "0.2.5",
                 "schema_current": "0.2.3",
             }
@@ -427,15 +427,22 @@ def test_discovery_diagnostics_section_shows_address_context(monkeypatch, tmp_pa
     _setup_temp_db(monkeypatch, tmp_path)
     monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://brain.example:8789")
 
+    monkeypatch.setattr(
+        "app.ui.diagnostics.build_nodeviews",
+        lambda hours=72: [SimpleNamespace(stale=False, agent_version="0.2.5", health_state="healthy", advice_sev=None, age_minutes=2, advice=[])],
+    )
+    monkeypatch.setattr(
+        "app.ui.diagnostics.build_service_rows",
+        lambda: [{"name": "Harry Brain", "tags": ["brain"], "status": "online"}],
+    )
+
     with TestClient(main.app) as client:
         resp = client.get("/diagnostics")
 
     assert resp.status_code == 200
     html = resp.text
-    assert "Brain reachable?" in html
     assert "Agents reporting?" in html
-    assert "Installer artifact" in html
-    assert "Service health" in html
+    assert "Service Health" in html
     assert "Recommendations" in html
     assert "Advanced diagnostics" in html
     assert "Brain Address" in html
@@ -443,8 +450,36 @@ def test_discovery_diagnostics_section_shows_address_context(monkeypatch, tmp_pa
     assert "Recommended LAN" in html
     assert "Container networking" in html
     assert "Discovery methods" in html
-    assert "Installer address configured?" not in html
-    assert "Set HARRY_PUBLIC_BASE_URL" not in html[:html.index("Advanced diagnostics")]
+    assert "Installer artifact" in html[html.index("Advanced diagnostics") :]
+    assert "Brain reachable?" not in html
+    assert "Installer artifact" not in html[:html.index("Advanced diagnostics")]
+    assert "Healthy" in html
+    assert "Unknown" not in html[:html.index("Advanced diagnostics")]
+
+
+def test_diagnostics_service_health_is_positive_for_healthy_services(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        "app.ui.diagnostics.build_nodeviews",
+        lambda hours=72: [SimpleNamespace(stale=False, agent_version="0.2.5", health_state="healthy", advice_sev=None, age_minutes=2, advice=[])],
+    )
+    monkeypatch.setattr(
+        "app.ui.diagnostics.build_service_rows",
+        lambda: [
+            {"name": "Harry Brain", "tags": ["brain"], "status": "online"},
+            {"name": "Local Cache", "tags": ["service"], "status": "online"},
+        ],
+    )
+
+    with TestClient(main.app) as client:
+        resp = client.get("/diagnostics")
+
+    assert resp.status_code == 200
+    html = resp.text
+    assert "Service Health" in html
+    assert "Healthy" in html
+    assert "Unknown" not in html[:html.index("Advanced diagnostics")]
 
 
 def test_api_page_lists_core_endpoints_and_examples():

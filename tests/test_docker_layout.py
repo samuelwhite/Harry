@@ -27,7 +27,7 @@ def test_container_layout_imports_app_main(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert "2026.05.09" in result.stdout
+    assert "2026.05.15" in result.stdout
 
 
 def test_dockerfile_copies_package_root_not_nested_app():

@@ -80,7 +80,7 @@ def render_api_docs_page() -> str:
   "ok": true,
   "service": "harry-brain",
   "display_name": "Harry Brain",
-  "brain_version": "2026.05.09",
+  "brain_version": "2026.05.15",
   "agent_version": "0.2.5",
   "schema_current": "0.2.3",
   "base_url": "http://brain-ip:8789",

@@ -110,8 +110,8 @@ def test_windows_brain_payload_has_current_agent_version():
 
     assert 'AGENT_VERSION="0.2.5"' in payload_script
     assert 'AGENT_VERSION="0.2.3"' not in payload_script
-    assert "BRAIN_VERSION=\"2026.05.09\"" in payload_script
-    assert "AppVersion=2026.05.09" in setup_iss
+    assert "BRAIN_VERSION=\"2026.05.15\"" in payload_script
+    assert "AppVersion=2026.05.15" in setup_iss
 
 
 def test_windows_agent_docs_mention_diagnostics_commands():

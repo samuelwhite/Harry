@@ -21,7 +21,7 @@ import re
 # -----------------------------------------------------------------------------
 
 # Brain release version (calendar versioning)
-BRAIN_VERSION = "2026.05.09"
+BRAIN_VERSION = "2026.05.15"
 
 # Distributed agent script version (not the schema version)
 AGENT_VERSION = "0.2.5"
