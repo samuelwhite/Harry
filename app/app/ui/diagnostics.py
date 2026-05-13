@@ -81,12 +81,12 @@ def _downloads_dir() -> Path:
     return here.parents[3] / "downloads"
 
 
-def _windows_installer_manifest_path() -> Path:
-    return _downloads_dir() / "HarryAgentSetup.manifest.json"
+def _windows_installer_manifest_path(installer_name: str) -> Path:
+    return (_downloads_dir() / installer_name).with_suffix(".manifest.json")
 
 
-def _load_windows_installer_manifest() -> dict[str, object] | None:
-    path = _windows_installer_manifest_path()
+def _load_windows_installer_manifest(installer_name: str) -> dict[str, object] | None:
+    path = _windows_installer_manifest_path(installer_name)
     if not path.exists() or not path.is_file():
         return None
 
@@ -98,13 +98,13 @@ def _load_windows_installer_manifest() -> dict[str, object] | None:
     return data if isinstance(data, dict) else None
 
 
-def _windows_installer_is_current(manifest: dict[str, object] | None) -> bool:
+def _windows_installer_is_current(installer_name: str, manifest: dict[str, object] | None) -> bool:
     if not manifest:
         return False
 
     schema_current = _load_schema_current()
     return (
-        str(manifest.get("installer_name") or "") == "HarryAgentSetup.exe"
+        str(manifest.get("installer_name") or "") == installer_name
         and str(manifest.get("brain_version") or "") == BRAIN_VERSION
         and str(manifest.get("agent_version") or "") == AGENT_VERSION
         and str(manifest.get("schema_current") or "") == schema_current
@@ -193,26 +193,26 @@ def _service_summary() -> tuple[str, str, str, str | None]:
     return _summary_status("Service Health", f"{healthy} watched services healthy.", "ok", "Healthy")
 
 
-def _installer_artifact_row() -> tuple[str, str, str]:
-    manifest = _load_windows_installer_manifest()
-    if _windows_installer_is_current(manifest):
+def _installer_artifact_row(installer_name: str, label: str) -> tuple[str, str, str]:
+    manifest = _load_windows_installer_manifest(installer_name)
+    if _windows_installer_is_current(installer_name, manifest):
         return (
-            "Installer artifact",
+            label,
             "online",
-            "Committed Windows installer EXE and manifest are current.",
+            f"Committed {label.lower()} EXE and manifest are current.",
         )
 
     if not manifest:
         return (
-            "Installer artifact",
+            label,
             "warning",
-            "Windows installer EXE or manifest is missing. Rebuild and commit the latest stable artifact.",
+            f"{label} EXE or manifest is missing. Rebuild and commit the latest stable artifact.",
         )
 
     return (
-        "Installer artifact",
+        label,
         "warning",
-        "Windows installer EXE is stale. Rebuild and commit the latest stable artifact.",
+        f"{label} EXE is stale. Rebuild and commit the latest stable artifact.",
     )
 
 
@@ -273,7 +273,10 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
     )
 
     brain_rows = _advanced_discovery_rows(request)
-    advanced_rows = brain_rows + [_installer_artifact_row()]
+    advanced_rows = brain_rows + [
+        _installer_artifact_row("HarryAgentSetup.exe", "Agent installer artifact"),
+        _installer_artifact_row("HarryBrainSetup.exe", "Brain installer artifact"),
+    ]
     agent_title, agent_body, agent_status, agent_badge = _agent_summary(nodeviews)
     service_title, service_body, service_status, service_badge = _service_summary()
     recommendation_lines = [

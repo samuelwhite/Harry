@@ -573,12 +573,12 @@ def _load_current_schema_version() -> str:
         return "unknown"
 
 
-def _windows_installer_manifest_path() -> Path:
-    return _downloads_dir() / "HarryAgentSetup.manifest.json"
+def _windows_installer_manifest_path(installer_name: str) -> Path:
+    return (_downloads_dir() / installer_name).with_suffix(".manifest.json")
 
 
-def _load_windows_installer_manifest() -> dict[str, object] | None:
-    path = _windows_installer_manifest_path()
+def _load_windows_installer_manifest(installer_name: str) -> dict[str, object] | None:
+    path = _windows_installer_manifest_path(installer_name)
     if not path.exists() or not path.is_file():
         return None
 
@@ -590,16 +590,39 @@ def _load_windows_installer_manifest() -> dict[str, object] | None:
     return data if isinstance(data, dict) else None
 
 
-def _windows_installer_is_current(manifest: dict[str, object] | None) -> bool:
+def _windows_installer_is_current(installer_name: str, manifest: dict[str, object] | None) -> bool:
     if not manifest:
         return False
 
     schema_current = _load_current_schema_version()
     return (
-        str(manifest.get("installer_name") or "") == "HarryAgentSetup.exe"
+        str(manifest.get("installer_name") or "") == installer_name
         and str(manifest.get("brain_version") or "") == BRAIN_VERSION
         and str(manifest.get("agent_version") or "") == AGENT_VERSION
         and str(manifest.get("schema_current") or "") == schema_current
+    )
+
+
+def _download_windows_installer(installer_name: str) -> FileResponse:
+    path = _downloads_dir() / installer_name
+    manifest = _load_windows_installer_manifest(installer_name)
+
+    if not path.exists() or not path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"{installer_name} not found. Expected downloads/{installer_name}.",
+        )
+
+    if not _windows_installer_is_current(installer_name, manifest):
+        raise HTTPException(
+            status_code=503,
+            detail=f"{installer_name} is stale or missing its manifest. Rebuild it with the Windows release script.",
+        )
+
+    return FileResponse(
+        path=str(path),
+        filename=installer_name,
+        media_type="application/octet-stream",
     )
 
 
@@ -626,15 +649,15 @@ def downloads_page(request: Request) -> HTMLResponse:
                 continue
             if path.name.endswith(".manifest.json"):
                 continue
-            if "Agent" not in path.name:
+            if path.name not in ("HarryAgentSetup.exe", "HarryBrainSetup.exe"):
                 continue
 
             if path.name == "HarryAgentSetup.exe":
                 href = "/downloads/windows-agent"
                 platform = "Windows"
-            elif path.name == "HarryAgentInstall.sh":
-                href = "/downloads/linux-agent"
-                platform = "Linux"
+            elif path.name == "HarryBrainSetup.exe":
+                href = "/downloads/windows-brain"
+                platform = "Windows"
             else:
                 href = f"/downloads/file/{quote(path.name)}"
                 platform = "Other"
@@ -709,8 +732,8 @@ def downloads_page(request: Request) -> HTMLResponse:
 <section class="section" id="downloads-files">
   <div class="sectionhead">
     <div>
-      <h2 class="h2">Agent Installers</h2>
-      <div class="h2sub">Install Harry Agent on another machine.</div>
+      <h2 class="h2">Installer downloads</h2>
+      <div class="h2sub">Install Harry Brain or Harry Agent on another machine.</div>
     </div>
   </div>
   {downloads_html}
@@ -813,26 +836,12 @@ def fleet_partial(request: Request) -> HTMLResponse:
 
 @router.get("/downloads/windows-agent")
 def download_windows_agent() -> FileResponse:
-    path = _downloads_dir() / "HarryAgentSetup.exe"
-    manifest = _load_windows_installer_manifest()
+    return _download_windows_installer("HarryAgentSetup.exe")
 
-    if not path.exists() or not path.is_file():
-        raise HTTPException(
-            status_code=404,
-            detail="Windows agent installer not found. Expected downloads/HarryAgentSetup.exe.",
-        )
 
-    if not _windows_installer_is_current(manifest):
-        raise HTTPException(
-            status_code=503,
-            detail="Windows agent installer is stale or missing its manifest. Rebuild it with scripts/build-windows-installer.ps1.",
-        )
-
-    return FileResponse(
-        path=str(path),
-        filename="HarryAgentSetup.exe",
-        media_type="application/octet-stream",
-    )
+@router.get("/downloads/windows-brain")
+def download_windows_brain() -> FileResponse:
+    return _download_windows_installer("HarryBrainSetup.exe")
 
 
 @router.get("/downloads/windows-agent-script")

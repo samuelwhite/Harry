@@ -102,6 +102,19 @@ def test_windows_agent_installer_sources_runtime_agent_package():
 
     assert "install_agent.ps1" in brain_iss
     assert "HarryAgentSetup.exe" not in brain_iss
+    assert "HarryBrainSetup.exe" not in agent_iss
+
+
+def test_windows_brain_installer_sources_current_versions():
+    brain_iss = Path("installers/windows/iss/HarryBrain.iss").read_text(encoding="utf-8")
+    brain_payload = Path("installers/windows/brain-payload/HarryBrainService.xml").read_text(encoding="utf-8")
+    build_script = Path("scripts/build-windows-brain-installer.ps1").read_text(encoding="utf-8")
+
+    assert "OutputBaseFilename=HarryBrainSetup" in brain_iss
+    assert "HarryBrainSetup.manifest.json" in build_script
+    assert "brain_server.exe" in brain_payload
+    assert "AppVersion=2026.05.15" in brain_iss
+    assert 'AGENT_VERSION="0.2.5"' in Path("installers/windows/brain-payload/_internal/dist/harry_agent.sh").read_text(encoding="utf-8")
 
 
 def test_windows_brain_payload_has_current_agent_version():

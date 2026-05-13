@@ -44,11 +44,12 @@ http://localhost:8787
 
 Your machine will automatically register as the first node.
 
-If you need the discovery-aware agent installer directly from the Downloads page, use the PowerShell installer script and let it find Harry Brain automatically.
+If you need the discovery-aware Windows installer downloads directly from the Downloads page, use the Brain or Agent installer links and let them find Harry Brain automatically.
 
-If you want to rebuild the Windows installer EXE itself, run:
+If you want to rebuild the Windows installer EXEs themselves, run:
 
 `pwsh -File scripts/build-windows-installer.ps1`
+`pwsh -File scripts/build-windows-brain-installer.ps1`
 
 That script expects Inno Setup 6 (`ISCC.exe`) to be available.
 
@@ -56,12 +57,15 @@ That refreshes the packaged Windows artifacts and writes:
 
 `downloads/HarryAgentSetup.exe`
 `downloads/HarryAgentSetup.manifest.json`
+`downloads/HarryBrainSetup.exe`
+`downloads/HarryBrainSetup.manifest.json`
 
 To verify the installer path:
 
 `downloads/HarryAgentSetup.exe`
+`downloads/HarryBrainSetup.exe`
 
-The installer should reflect Brain `2026.05.15`, Agent `0.2.5`, and Schema `0.2.3`.
+The installers should reflect Brain `2026.05.15`, Agent `0.2.5`, and Schema `0.2.3`.
 
 Harry’s stable Windows installer artifacts are committed in `downloads/`, so a normal `git pull` or `update-harry` refreshes them with the repo.
 
@@ -73,16 +77,20 @@ For optional manual copy:
 
 `scp downloads\HarryAgentSetup.exe <ssh-user>@<brain-host>:/opt/harry/downloads/`
 `scp downloads\HarryAgentSetup.manifest.json <ssh-user>@<brain-host>:/opt/harry/downloads/`
+`scp downloads\HarryBrainSetup.exe <ssh-user>@<brain-host>:/opt/harry/downloads/`
+`scp downloads\HarryBrainSetup.manifest.json <ssh-user>@<brain-host>:/opt/harry/downloads/`
 
 On the Brain, verify the artifact and served download:
 
 `cat /opt/harry/downloads/HarryAgentSetup.manifest.json`
+`cat /opt/harry/downloads/HarryBrainSetup.manifest.json`
 `curl -o /tmp/HarryAgentSetup.exe http://127.0.0.1:8789/downloads/windows-agent`
+`curl -o /tmp/HarryBrainSetup.exe http://127.0.0.1:8789/downloads/windows-brain`
 
 Notes:
 
-`HarryAgentSetup.exe` is generated, but committed here as the latest stable artifact.
-The manifest prevents stale installers from being served silently.
+`HarryAgentSetup.exe` and `HarryBrainSetup.exe` are generated, but committed here as the latest stable artifacts.
+The manifests prevent stale installers from being served silently.
 The build step requires Inno Setup 6 and `ISCC.exe` on PATH or installed in the default location.
 The deploy helper is optional for manual copies, not required for normal updates.
 

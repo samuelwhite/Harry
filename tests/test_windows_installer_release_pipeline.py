@@ -7,6 +7,7 @@ from app.versions import BRAIN_VERSION
 
 def test_windows_installer_release_script_describes_current_pipeline():
     script = Path("scripts/build-windows-installer.ps1").read_text(encoding="utf-8")
+    brain_script = Path("scripts/build-windows-brain-installer.ps1").read_text(encoding="utf-8")
     deploy = Path("scripts/deploy-windows-installer.ps1").read_text(encoding="utf-8")
     release = Path("scripts/release-windows-installer.ps1").read_text(encoding="utf-8")
 
@@ -26,6 +27,12 @@ def test_windows_installer_release_script_describes_current_pipeline():
     assert "Brain version:" in script
     assert "Agent version:" in script
     assert "Schema version:" in script
+    assert "brain_server.exe" in brain_script
+    assert "HarryBrainSetup.exe" in brain_script
+    assert "HarryBrainSetup.manifest.json" in brain_script
+    assert "Building HarryBrainSetup.exe" in brain_script
+    assert "brain_version" in brain_script
+    assert "agent_binary_sha256" in brain_script
     assert "Start-Transcript" in Path("agent/windows/install_agent.ps1").read_text(encoding="utf-8")
 
     assert "TargetHost" in deploy
@@ -33,15 +40,19 @@ def test_windows_installer_release_script_describes_current_pipeline():
     assert "TargetUser" in deploy
     assert "scp" in deploy
     assert "Windows installer EXE not found" in deploy
-    assert "Windows installer manifest not found" in deploy
+    assert "Get-InstallerArtifact" in deploy
+    assert "ChangeExtension" in deploy
     assert "manifest versions do not match" in deploy
     assert "Copying Windows installer artifacts" in deploy
+    assert "HarryBrainSetup.exe" in deploy
 
     assert "Build complete." in release
     assert "Next steps:" in release
     assert "TargetHost" in release
     assert "TargetUser" in release
     assert "Deploying Windows installer artifacts" in release
+    assert "Building Windows Brain installer" in release
+    assert "build-windows-brain-installer.ps1" in release
     assert "brain_version" in script
     assert "agent_version" in script
     assert "schema_current" in script
@@ -63,14 +74,17 @@ def test_windows_installer_manifest_is_expected_runtime_name():
     gitignore = Path(".gitignore").read_text(encoding="utf-8")
     readme = Path("README.md").read_text(encoding="utf-8")
 
-    assert "HarryAgentSetup.manifest.json" in router
-    assert "Windows agent installer is stale or missing its manifest" in router
-    assert "Run scripts/build-windows-installer.ps1" in router or "build-windows-installer.ps1" in router
+    assert "with_suffix(\".manifest.json\")" in router
+    assert "HarryAgentSetup.exe" in router
+    assert "HarryBrainSetup.exe" in router
+    assert "stale or missing its manifest" in router
     assert "!downloads/HarryAgentSetup.exe" in gitignore
     assert "!downloads/HarryAgentSetup.manifest.json" in gitignore
+    assert "!downloads/HarryBrainSetup.exe" in gitignore
+    assert "!downloads/HarryBrainSetup.manifest.json" in gitignore
     assert "committed in `downloads/`" in readme
     assert "normal `git pull` or `update-harry` refreshes them" in readme
-    assert "generated, but committed here as the latest stable artifact" in readme
+    assert "generated, but committed here as the latest stable artifacts" in readme
     assert "optional manual build-and-copy flow" in readme
     assert "C:\\ProgramData\\Harry\\logs\\HarryAgent.install.log" in readme
     assert "C:\\ProgramData\\Harry\\logs\\HarryAgent.runtime.log" in readme
@@ -78,3 +92,4 @@ def test_windows_installer_manifest_is_expected_runtime_name():
     assert "--diagnostics" in readme
     assert "--send-once" in readme
     assert "--once" in readme
+    assert "HarryBrainSetup.exe" in readme

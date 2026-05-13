@@ -69,6 +69,7 @@ def render_api_docs_page() -> str:
         ("POST", "/ingest", "Agent telemetry ingest endpoint."),
         ("GET", "/inventory.json", "Inventory data for the UI and automation."),
         ("GET", "/api/services", "Service-awareness rows for the dashboard."),
+        ("GET", "/downloads/windows-brain", "Windows Brain installer EXE."),
         ("GET", "/downloads/windows-agent", "Windows installer EXE."),
         ("GET", "/downloads/windows-agent-exe", "Windows agent installer binary."),
         ("GET", "/downloads/windows-agent-script", "Discovery-aware Windows installer script."),
@@ -84,6 +85,7 @@ def render_api_docs_page() -> str:
   "agent_version": "0.2.5",
   "schema_current": "0.2.3",
   "base_url": "http://brain-ip:8789",
+  "brain_installer_download_url": "http://brain-ip:8789/downloads/windows-brain",
   "installer_download_url": "http://brain-ip:8789/downloads/windows-agent",
   "ingest_url": "http://brain-ip:8789/ingest"
 }
@@ -148,7 +150,7 @@ def render_api_docs_page() -> str:
     </div>
     <div class="card">
       <div class="subcardtitle">PowerShell</div>
-      <pre style="margin:0; white-space:pre-wrap; font-size:12.5px; line-height:1.5; color:rgba(255,255,255,0.88);">{_html_escape("Invoke-WebRequest http://<brain-ip>:8789/downloads/windows-agent -OutFile HarryAgentSetup.exe")}</pre>
+      <pre style="margin:0; white-space:pre-wrap; font-size:12.5px; line-height:1.5; color:rgba(255,255,255,0.88);">{_html_escape("Invoke-WebRequest http://<brain-ip>:8789/downloads/windows-brain -OutFile HarryBrainSetup.exe")}</pre>
     </div>
     <div class="card">
       <div class="subcardtitle">Python requests</div>

@@ -156,6 +156,7 @@ def test_discover_endpoint_reports_brain_identity(monkeypatch, tmp_path):
     assert data["address_source"] == "canonical"
     assert data["base_url"] == "http://brain.example:8789"
     assert data["ingest_url"] == "http://brain.example:8789/ingest"
+    assert data["brain_installer_download_url"] == "http://brain.example:8789/downloads/windows-brain"
     assert data["installer_download_url"] == "http://brain.example:8789/downloads/windows-agent"
     assert data["agent_download_url"] == "http://brain.example:8789/downloads/windows-agent-exe"
     assert data["agent_update_script_url"] == "http://brain.example:8789/downloads/windows-update-script"
@@ -197,6 +198,29 @@ def test_downloads_exposes_windows_agent_setup(monkeypatch, tmp_path):
     assert "HarryAgentSetup.exe" in resp.headers["content-disposition"]
 
 
+def test_downloads_exposes_windows_brain_setup(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("HARRY_DOWNLOADS_DIR", str(tmp_path))
+    (tmp_path / "HarryBrainSetup.exe").write_bytes(b"MZ")
+    (tmp_path / "HarryBrainSetup.manifest.json").write_text(
+        json.dumps(
+            {
+                "installer_name": "HarryBrainSetup.exe",
+                "brain_version": "2026.05.15",
+                "agent_version": "0.2.5",
+                "schema_current": "0.2.3",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with TestClient(main.app) as client:
+        resp = client.get("/downloads/windows-brain")
+
+    assert resp.status_code == 200
+    assert "HarryBrainSetup.exe" in resp.headers["content-disposition"]
+
+
 def test_downloads_rejects_stale_windows_agent_setup(monkeypatch, tmp_path):
     _setup_temp_db(monkeypatch, tmp_path)
     monkeypatch.setenv("HARRY_DOWNLOADS_DIR", str(tmp_path))
@@ -215,6 +239,29 @@ def test_downloads_rejects_stale_windows_agent_setup(monkeypatch, tmp_path):
 
     with TestClient(main.app) as client:
         resp = client.get("/downloads/windows-agent")
+
+    assert resp.status_code == 503
+    assert "stale" in resp.text.lower()
+
+
+def test_downloads_rejects_stale_windows_brain_setup(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("HARRY_DOWNLOADS_DIR", str(tmp_path))
+    (tmp_path / "HarryBrainSetup.exe").write_bytes(b"MZ")
+    (tmp_path / "HarryBrainSetup.manifest.json").write_text(
+        json.dumps(
+            {
+                "installer_name": "HarryBrainSetup.exe",
+                "brain_version": "2026.03.18",
+                "agent_version": "0.2.3",
+                "schema_current": "0.2.3",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with TestClient(main.app) as client:
+        resp = client.get("/downloads/windows-brain")
 
     assert resp.status_code == 503
     assert "stale" in resp.text.lower()
@@ -307,13 +354,17 @@ def test_downloads_rejects_detected_link_local_ip(monkeypatch, tmp_path):
 def test_downloads_removes_local_only_block(monkeypatch, tmp_path):
     monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://brain.example:8789")
     (tmp_path / "HarryAgentSetup.exe").write_bytes(b"MZ")
+    (tmp_path / "HarryBrainSetup.exe").write_bytes(b"MZ")
     html = _render_downloads(monkeypatch, tmp_path)
 
     assert "Recommended Windows installer" not in html
     assert "Windows installer" not in html
     assert "HarryAgentSetup.exe" in html
+    assert "HarryBrainSetup.exe" in html
     assert html.count("HarryAgentSetup.exe") == 1
+    assert html.count("HarryBrainSetup.exe") == 1
     assert "/downloads/windows-agent" in html
+    assert "/downloads/windows-brain" in html
     assert "/downloads/windows-agent-exe" not in html
     assert "Download Windows installer" not in html
     assert "Other machines should use this address." in html
@@ -450,9 +501,11 @@ def test_discovery_diagnostics_section_shows_address_context(monkeypatch, tmp_pa
     assert "Recommended LAN" in html
     assert "Container networking" in html
     assert "Discovery methods" in html
-    assert "Installer artifact" in html[html.index("Advanced diagnostics") :]
+    assert "Agent installer artifact" in html[html.index("Advanced diagnostics") :]
+    assert "Brain installer artifact" in html[html.index("Advanced diagnostics") :]
     assert "Brain reachable?" not in html
-    assert "Installer artifact" not in html[:html.index("Advanced diagnostics")]
+    assert "Agent installer artifact" not in html[:html.index("Advanced diagnostics")]
+    assert "Brain installer artifact" not in html[:html.index("Advanced diagnostics")]
     assert "Healthy" in html
     assert "Unknown" not in html[:html.index("Advanced diagnostics")]
 
@@ -503,6 +556,6 @@ def test_api_page_lists_core_endpoints_and_examples():
     assert 'href="/downloads' in html
     assert 'href="/api"' in html
     assert "curl http://&lt;brain-ip&gt;:8789/health" in html
-    assert "Invoke-WebRequest http://&lt;brain-ip&gt;:8789/downloads/windows-agent" in html
+    assert "Invoke-WebRequest http://&lt;brain-ip&gt;:8789/downloads/windows-brain" in html
     assert "import requests" in html
     assert "Privacy Mode Enabled" not in html
