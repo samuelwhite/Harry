@@ -14,6 +14,7 @@ import app.brain_address as brain_address
 import app.main as main
 import importlib
 from app.ui import db as dbmod
+import app.ui.diagnostics as diagnostics
 
 router = importlib.import_module("app.ui.router")
 
@@ -479,22 +480,15 @@ def test_discovery_diagnostics_section_shows_address_context(monkeypatch, tmp_pa
     monkeypatch.setenv("HARRY_PUBLIC_BASE_URL", "http://brain.example:8789")
 
     monkeypatch.setattr(
-        "app.ui.diagnostics.build_nodeviews",
+        diagnostics,
+        "build_nodeviews",
         lambda hours=72: [SimpleNamespace(stale=False, agent_version="0.2.5", health_state="healthy", advice_sev=None, age_minutes=2, advice=[])],
     )
-    monkeypatch.setattr(
-        "app.ui.diagnostics.build_service_rows",
-        lambda: [{"name": "Harry Brain", "tags": ["brain"], "status": "online"}],
-    )
+    monkeypatch.setattr(diagnostics, "_service_summary", lambda: None)
+    monkeypatch.setattr(diagnostics, "_installer_download_issues", lambda: [])
 
-    with TestClient(main.app) as client:
-        resp = client.get("/diagnostics")
-
-    assert resp.status_code == 200
-    html = resp.text
+    html = diagnostics.render_diagnostics_page(_make_starlette_request(), hours=72, debug=False)
     assert "Agents reporting?" in html
-    assert "Service Health" in html
-    assert "Recommendations" in html
     assert "Advanced diagnostics" in html
     assert "Brain Address" in html
     assert "Canonical address" in html
@@ -508,31 +502,50 @@ def test_discovery_diagnostics_section_shows_address_context(monkeypatch, tmp_pa
     assert "Brain installer artifact" not in html[:html.index("Advanced diagnostics")]
     assert "Healthy" in html
     assert "Unknown" not in html[:html.index("Advanced diagnostics")]
+    assert "Service Health" not in html
+    assert 'id="recommendations"' not in html
+    assert "commit installer artifact" not in html.lower()
+    assert "HARRY_PUBLIC_BASE_URL" not in html[:html.index("Advanced diagnostics")]
 
 
 def test_diagnostics_service_health_is_positive_for_healthy_services(monkeypatch, tmp_path):
     _setup_temp_db(monkeypatch, tmp_path)
 
     monkeypatch.setattr(
-        "app.ui.diagnostics.build_nodeviews",
+        diagnostics,
+        "build_nodeviews",
         lambda hours=72: [SimpleNamespace(stale=False, agent_version="0.2.5", health_state="healthy", advice_sev=None, age_minutes=2, advice=[])],
     )
     monkeypatch.setattr(
-        "app.ui.diagnostics.build_service_rows",
-        lambda: [
-            {"name": "Harry Brain", "tags": ["brain"], "status": "online"},
-            {"name": "Local Cache", "tags": ["service"], "status": "online"},
-        ],
+        diagnostics,
+        "_service_summary",
+        lambda: ("Service Health", "2 watched services healthy.", "ok", "Healthy"),
     )
+    monkeypatch.setattr(diagnostics, "_installer_download_issues", lambda: [])
 
-    with TestClient(main.app) as client:
-        resp = client.get("/diagnostics")
-
-    assert resp.status_code == 200
-    html = resp.text
-    assert "Service Health" in html
+    html = diagnostics.render_diagnostics_page(_make_starlette_request(), hours=72, debug=False)
+    summary_html = html.split('<details class="card compactcard" id="advanced-diagnostics">', 1)[0]
+    assert 'id="diagnostic-summary"' in html
+    assert "Service Health" in summary_html
     assert "Healthy" in html
-    assert "Unknown" not in html[:html.index("Advanced diagnostics")]
+    assert "Unknown" not in summary_html
+
+
+def test_diagnostics_hides_recommendations_when_healthy(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        diagnostics,
+        "build_nodeviews",
+        lambda hours=72: [SimpleNamespace(stale=False, agent_version="0.2.5", health_state="healthy", advice_sev=None, age_minutes=2, advice=[])],
+    )
+    monkeypatch.setattr(diagnostics, "_service_summary", lambda: None)
+    monkeypatch.setattr(diagnostics, "_installer_download_issues", lambda: [])
+
+    html = diagnostics.render_diagnostics_page(_make_starlette_request(), hours=72, debug=False)
+    assert 'id="recommendations"' not in html
+    assert "Service Health" not in html
+    assert "Healthy systems should feel calm and minimal." in html
 
 
 def test_api_page_lists_core_endpoints_and_examples():

@@ -176,11 +176,11 @@ def _agent_summary(nodeviews) -> tuple[str, str, str, str | None]:
     return _summary_status("Agents reporting?", f"{healthy_n} healthy agents reporting.", "ok", "Healthy")
 
 
-def _service_summary() -> tuple[str, str, str, str | None]:
+def _service_summary() -> tuple[str, str, str, str | None] | None:
     rows = build_service_rows()
     watched = [row for row in rows if "brain" not in [str(tag).strip().lower() for tag in (row.get("tags") or [])]]
     if not watched:
-        return _summary_status("Service Health", "No watched services configured.", "ok", "No watched services")
+        return None
 
     healthy = sum(1 for row in watched if str(row.get("status") or "").lower() in ("online", "healthy"))
     degraded = sum(1 for row in watched if str(row.get("status") or "").lower() in ("degraded", "warning"))
@@ -191,6 +191,15 @@ def _service_summary() -> tuple[str, str, str, str | None]:
         return _summary_status("Service Health", body, "warn" if not offline else "bad", "Needs attention")
 
     return _summary_status("Service Health", f"{healthy} watched services healthy.", "ok", "Healthy")
+
+
+def _installer_download_issues() -> List[str]:
+    issues: List[str] = []
+    for installer_name, label in (("HarryAgentSetup.exe", "Windows agent installer"), ("HarryBrainSetup.exe", "Windows Brain installer")):
+        manifest = _load_windows_installer_manifest(installer_name)
+        if not _windows_installer_is_current(installer_name, manifest):
+            issues.append(label)
+    return issues
 
 
 def _installer_artifact_row(installer_name: str, label: str) -> tuple[str, str, str]:
@@ -278,40 +287,53 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
         _installer_artifact_row("HarryBrainSetup.exe", "Brain installer artifact"),
     ]
     agent_title, agent_body, agent_status, agent_badge = _agent_summary(nodeviews)
-    service_title, service_body, service_status, service_badge = _service_summary()
-    recommendation_lines = [
-        "Install or restart the local agent if this machine is stale.",
-        "Rebuild and commit the Windows installer artifact if Downloads is stale.",
-        "Set HARRY_PUBLIC_BASE_URL if installers cannot find the Brain.",
-    ]
+    service_summary = _service_summary()
 
-    content = f"""
-<div class="section" id="diagnostic-summary">
-  <div class="sectionhead">
-    <div>
-      <div class="h2">Summary</div>
-      <div class="h2sub">Actionable status at a glance.</div>
-    </div>
-  </div>
+    recommendation_lines: List[str] = []
+    if not nodeviews:
+        recommendation_lines.append("Install the Harry agent on at least one machine so it can start reporting.")
+    elif stale_n or behind:
+        recommendation_lines.append("Restart or update the agents that are stale or behind.")
+    if service_summary is not None:
+        service_title, service_body, service_status, service_badge = service_summary
+        if "healthy" not in service_body.lower():
+            recommendation_lines.append("Check the monitored service on the machine that runs it.")
+    if _installer_download_issues():
+        recommendation_lines.append("Refresh the Windows installer downloads before onboarding new machines.")
 
-  <div class="cardgrid">
-    {_render_action_card(agent_title, agent_body, agent_status, agent_badge)}
-    {_render_action_card(service_title, service_body, service_status, service_badge)}
-    {_render_action_card("Recommended actions", " · ".join(recommendation_lines), "ok", "Next steps")}
-  </div>
-</div>
-
+    recommendations_html = ""
+    if recommendation_lines:
+        recommendations_html = f"""
 <div class="divider"></div>
 
 <div class="section" id="recommendations">
   <div class="sectionhead">
     <div>
       <div class="h2">Recommendations</div>
-      <div class="h2sub">What to do next if something needs attention.</div>
+      <div class="h2sub">Only shown when something needs attention.</div>
     </div>
   </div>
   {_render_advice_queue(nodeviews)}
 </div>
+"""
+
+    content = f"""
+<div class="section" id="diagnostic-summary">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">Summary</div>
+      <div class="h2sub">Actionable status at a glance. Healthy systems should feel calm and minimal.</div>
+    </div>
+  </div>
+
+  <div class="cardgrid">
+    {_render_action_card(agent_title, agent_body, agent_status, agent_badge)}
+    {'' if service_summary is None else _render_action_card(service_summary[0], service_summary[1], service_summary[2], service_summary[3])}
+    {'' if not recommendation_lines else _render_action_card("Recommendations", " · ".join(recommendation_lines), "warn", "Next steps")}
+  </div>
+</div>
+
+{recommendations_html}
 
 <div class="divider"></div>
 
