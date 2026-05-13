@@ -10,6 +10,7 @@ from fastapi import Request
 
 from app.brain_address import discovery_methods_enabled, resolve_brain_address
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
+from app.service_awareness import build_service_rows
 from app.ui.db import _load_schema_current
 from app.ui.fleet import build_nodeviews, _render_advice_queue, _service_status_class, _service_status_label
 from app.ui.templates import _html_escape, render_shell
@@ -151,6 +152,47 @@ def _advanced_discovery_rows(request: Request) -> List[tuple[str, str, str]]:
     ]
 
 
+def _summary_status(label: str, body: str, status: str, badge: str | None = None) -> tuple[str, str, str, str | None]:
+    return (label, body, status, badge)
+
+
+def _agent_summary(nodeviews) -> tuple[str, str, str, str | None]:
+    total = len(nodeviews)
+    stale_n = sum(1 for n in nodeviews if n.stale)
+    behind = sum(
+        1
+        for n in nodeviews
+        if display_agent_version(n.agent_version) not in ("", "unknown") and display_agent_version(n.agent_version) != AGENT_VERSION
+    )
+    healthy_n = max(0, total - stale_n - behind)
+
+    if total == 0:
+        return _summary_status("Agents reporting?", "No agents reporting yet.", "info", "Not set up yet")
+    if stale_n or behind:
+        body = f"{healthy_n} healthy, {stale_n} stale, {behind} behind"
+        return _summary_status("Agents reporting?", body, "warn", "Needs attention")
+    if healthy_n == 1:
+        return _summary_status("Agents reporting?", "1 healthy agent reporting.", "ok", "Healthy")
+    return _summary_status("Agents reporting?", f"{healthy_n} healthy agents reporting.", "ok", "Healthy")
+
+
+def _service_summary() -> tuple[str, str, str, str | None]:
+    rows = build_service_rows()
+    watched = [row for row in rows if "brain" not in [str(tag).strip().lower() for tag in (row.get("tags") or [])]]
+    if not watched:
+        return _summary_status("Service Health", "No watched services configured.", "ok", "No watched services")
+
+    healthy = sum(1 for row in watched if str(row.get("status") or "").lower() in ("online", "healthy"))
+    degraded = sum(1 for row in watched if str(row.get("status") or "").lower() in ("degraded", "warning"))
+    offline = sum(1 for row in watched if str(row.get("status") or "").lower() in ("offline", "critical"))
+
+    if degraded or offline:
+        body = f"{healthy} healthy, {degraded} degraded, {offline} offline"
+        return _summary_status("Service Health", body, "warn" if not offline else "bad", "Needs attention")
+
+    return _summary_status("Service Health", f"{healthy} watched services healthy.", "ok", "Healthy")
+
+
 def _installer_artifact_row() -> tuple[str, str, str]:
     manifest = _load_windows_installer_manifest()
     if _windows_installer_is_current(manifest):
@@ -174,7 +216,8 @@ def _installer_artifact_row() -> tuple[str, str, str]:
     )
 
 
-def _render_action_card(title: str, body: str, status: str = "info") -> str:
+def _render_action_card(title: str, body: str, status: str = "info", badge_label: str | None = None) -> str:
+    badge = badge_label or _service_status_label(status)
     return f"""
 <div class="card compactcard">
   <div class="advrow" style="align-items:flex-start;">
@@ -182,7 +225,7 @@ def _render_action_card(title: str, body: str, status: str = "info") -> str:
       <div class="advnode">{_html_escape(title)}</div>
       <div class="advmsg">{_html_escape(body)}</div>
     </div>
-    <span class="badgetxt {_service_status_class(status)}">{_html_escape(_service_status_label(status))}</span>
+    <span class="badgetxt {_service_status_class(status)}">{_html_escape(badge)}</span>
   </div>
 </div>
 """
@@ -230,16 +273,13 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
     )
 
     brain_rows = _advanced_discovery_rows(request)
-    brain_address_text = next((text for label, _, text in brain_rows if label == "Brain Address"), "")
-    brain_message = brain_address_text if "Could not determine" not in brain_address_text else "Could not determine automatically."
-    brain_status = "online" if "Could not determine" not in brain_address_text else "warning"
-    installer_title, installer_status, installer_body = _installer_artifact_row()
-    service_status = "ok" if not stale_n and not bad_n and not warn_n and not behind else "warn"
-    service_body = f"{healthy_n} healthy, {stale_n} stale, {bad_n + warn_n} needing attention, {behind} behind"
+    advanced_rows = brain_rows + [_installer_artifact_row()]
+    agent_title, agent_body, agent_status, agent_badge = _agent_summary(nodeviews)
+    service_title, service_body, service_status, service_badge = _service_summary()
     recommendation_lines = [
-        "Set HARRY_PUBLIC_BASE_URL if installers cannot find the Brain.",
         "Install or restart the local agent if this machine is stale.",
         "Rebuild and commit the Windows installer artifact if Downloads is stale.",
+        "Set HARRY_PUBLIC_BASE_URL if installers cannot find the Brain.",
     ]
 
     content = f"""
@@ -252,10 +292,9 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
   </div>
 
   <div class="cardgrid">
-    {_render_action_card("Brain reachable?", brain_message, brain_status)}
-    {_render_action_card("Agents reporting?", f"{healthy_n} healthy, {stale_n} stale, {behind} behind", "warn" if stale_n or behind else "ok")}
-    {_render_action_card(installer_title, installer_body, installer_status)}
-    {_render_action_card("Service health", service_body, service_status)}
+    {_render_action_card(agent_title, agent_body, agent_status, agent_badge)}
+    {_render_action_card(service_title, service_body, service_status, service_badge)}
+    {_render_action_card("Recommended actions", " · ".join(recommendation_lines), "ok", "Next steps")}
   </div>
 </div>
 
@@ -283,7 +322,7 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
   <div class="advwrap" style="margin-top:16px;">
     {''.join(
       f'<div class="advrow"><div class="advleft"><div class="advnode">{_html_escape(label)}</div><div class="advmsg">{_html_escape(text)}</div></div><span class="badgetxt {_service_status_class(status)}">{_html_escape(_service_status_label(status))}</span></div>'
-      for label, status, text in brain_rows
+      for label, status, text in advanced_rows
     )}
   </div>
 </details>
