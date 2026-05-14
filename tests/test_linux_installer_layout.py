@@ -69,6 +69,10 @@ def test_install_agent_supports_synology_dsm_mode():
     assert "HARRY_BRAIN_URL_CACHE_FILE" in script
     assert "Task Scheduler" in script
     assert "/usr/syno/bin:/usr/syno/sbin" in script
+    assert "set -a" in script
+    assert '. "$CONFIG_FILE"' in script
+    assert "set +a" in script
+    assert script.index("set -a") < script.index('. "$CONFIG_FILE"') < script.index("set +a")
     assert "systemctl enable harry-agent.timer" in script
     assert "systemctl start harry-agent.timer" in script
     assert "enable --now" not in script

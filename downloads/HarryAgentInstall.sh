@@ -652,7 +652,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/harry-agent.env"
 
 if [ -f "$CONFIG_FILE" ]; then
+  set -a
   . "$CONFIG_FILE"
+  set +a
 fi
 
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/syno/bin:/usr/syno/sbin"
