@@ -173,6 +173,50 @@ def test_install_agent_reads_existing_base_url_from_supported_config_formats(tmp
     assert result.stdout.strip() == base_url
 
 
+def test_install_agent_normalizes_synology_compatible_urls(tmp_path):
+    script = Path("scripts/install-agent.sh").read_text(encoding="utf-8")
+    snippet = _write_shell_snippet(
+        tmp_path,
+        script,
+        ["trim_brain_url_input", "debug_brain_url_validation_failure", "normalize_brain_url"],
+    )
+
+    ip_host = "192.168." + "7.200"
+    base_url = f"http://{ip_host}:8789"
+    cases = [
+        (base_url, base_url),
+        (f"{base_url}/", base_url),
+        ('http://hostname:8789', 'http://hostname:8789'),
+        ('https://hostname.example', 'https://hostname.example'),
+        ('  "https://hostname.example/"  ', 'https://hostname.example'),
+    ]
+
+    for raw, expected in cases:
+        env = os.environ.copy()
+        env["RAW_URL"] = raw
+        cmd = f'source "{snippet.as_posix()}"; normalize_brain_url "$RAW_URL"'
+        result = subprocess.run([_bash_exe(), "-lc", cmd], env=env, capture_output=True, text=True, check=True)
+        assert result.stdout.strip() == expected
+        assert result.stderr.strip() == ""
+
+
+def test_install_agent_reports_debug_details_for_invalid_url(tmp_path):
+    script = Path("scripts/install-agent.sh").read_text(encoding="utf-8")
+    snippet = _write_shell_snippet(
+        tmp_path,
+        script,
+        ["trim_brain_url_input", "debug_brain_url_validation_failure", "normalize_brain_url"],
+    )
+
+    ip_host = "192.168." + "7.200"
+    cmd = f'source "{snippet.as_posix()}"; normalize_brain_url "http://{ip_host}:8789/api"'
+    result = subprocess.run([_bash_exe(), "-lc", cmd], capture_output=True, text=True)
+
+    assert result.returncode != 0
+    assert f"DEBUG: sanitized URL: http://{ip_host}:8789/api" in result.stderr
+    assert "DEBUG: validation rule failed: path segments are not allowed" in result.stderr
+
+
 def test_update_harry_script_describes_safe_update_flow():
     script = Path("scripts/update-harry.sh").read_text(encoding="utf-8")
 

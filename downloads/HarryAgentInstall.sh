@@ -260,16 +260,129 @@ install_optional_enrichers
 
 brain_public_port() {
   local port="${HARRY_PUBLIC_PORT:-8789}"
-  if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then
+  case "$port" in
+    ''|*[!0-9]*)
+      echo 8789
+      return 0
+      ;;
+  esac
+
+  if [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then
     echo "$port"
   else
     echo 8789
   fi
 }
 
+trim_brain_url_input() {
+  local raw="${1:-}"
+
+  printf '%s' "$raw" \
+    | tr -d '\r' \
+    | sed -e "s/^[[:space:]]*['\"]*//" -e "s/['\"]*[[:space:]]*$//"
+}
+
+debug_brain_url_validation_failure() {
+  local sanitized="${1:-}"
+  local rule="${2:-unknown}"
+
+  echo "DEBUG: sanitized URL: ${sanitized:-<empty>}" >&2
+  echo "DEBUG: validation rule failed: ${rule}" >&2
+}
+
 normalize_brain_url() {
   local raw="${1:-}"
-  "$PYTHON" "$DISCOVERY_HELPER" normalize "$raw" --default-port "$(brain_public_port)"
+  local sanitized=""
+  local normalized=""
+  local rest=""
+  local host=""
+  local port=""
+  local rule=""
+
+  sanitized="$(trim_brain_url_input "$raw")"
+  if [ -z "$sanitized" ]; then
+    rule="empty after trimming"
+    debug_brain_url_validation_failure "$sanitized" "$rule"
+    return 1
+  fi
+
+  case "$sanitized" in
+    http://*|https://*)
+      ;;
+    *)
+      sanitized="http://${sanitized}"
+      ;;
+  esac
+
+  rest="${sanitized#*://}"
+  if [ -z "$rest" ]; then
+    rule="missing host"
+    debug_brain_url_validation_failure "$sanitized" "$rule"
+    return 1
+  fi
+
+  case "$rest" in
+    */*)
+      if [ "${rest%/}" = "$rest" ]; then
+        rule="path segments are not allowed"
+        debug_brain_url_validation_failure "$sanitized" "$rule"
+        return 1
+      fi
+      rest="${rest%/}"
+      ;;
+  esac
+
+  case "$rest" in
+    *:*)
+      host="${rest%:*}"
+      port="${rest##*:}"
+      ;;
+    *)
+      host="$rest"
+      port=""
+      ;;
+  esac
+
+  host="$(trim_brain_url_input "$host")"
+  port="$(trim_brain_url_input "$port")"
+
+  if [ -z "$host" ]; then
+    rule="host is empty"
+    debug_brain_url_validation_failure "$sanitized" "$rule"
+    return 1
+  fi
+
+  case "$host" in
+    *[!A-Za-z0-9.-]*)
+      rule="host contains invalid characters"
+      debug_brain_url_validation_failure "$sanitized" "$rule"
+      return 1
+      ;;
+    -*|*-|.*|*.)
+      rule="host has invalid boundary characters"
+      debug_brain_url_validation_failure "$sanitized" "$rule"
+      return 1
+      ;;
+  esac
+
+  if [ -n "$port" ]; then
+    case "$port" in
+      *[!0-9]*)
+        rule="port contains non-digits"
+        debug_brain_url_validation_failure "$sanitized" "$rule"
+        return 1
+        ;;
+    esac
+
+    if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+      rule="port out of range"
+      debug_brain_url_validation_failure "$sanitized" "$rule"
+      return 1
+    fi
+  fi
+
+  normalized="${sanitized%/}"
+  printf '%s\n' "$normalized"
 }
 
 probe_brain_url() {
