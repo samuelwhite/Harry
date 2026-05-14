@@ -134,6 +134,51 @@ def _worst_severity(advice: List[Dict[str, Any]]) -> str:
     return worst
 
 
+def _advice_severity(advice_item: Dict[str, Any]) -> str:
+    return str(advice_item.get("severity") or advice_item.get("level") or "ok").lower()
+
+
+def _advice_text(advice_item: Dict[str, Any]) -> str:
+    msg = _safe_str(advice_item.get("message") or advice_item.get("text") or "").strip()
+    rec = _safe_str(advice_item.get("recommendation") or "").strip()
+    if msg and rec and rec not in msg:
+        return f"{msg} — {rec}"
+    return msg or rec
+
+
+def _advice_is_visible(advice_item: Dict[str, Any], *, include_info: bool) -> bool:
+    sev = _advice_severity(advice_item)
+    if sev in ("bad", "warn"):
+        return True
+    return include_info and sev == "info"
+
+
+def _visible_advice(advice: List[Dict[str, Any]], *, include_info: bool) -> List[Dict[str, Any]]:
+    return [a for a in advice if isinstance(a, dict) and _advice_is_visible(a, include_info=include_info)]
+
+
+def _render_advice_summary(advice: List[Dict[str, Any]], *, include_info: bool = True, empty_text: str = "All clear. (Boring is good.)") -> str:
+    visible = _visible_advice(advice, include_info=include_info)
+    if not visible:
+        return f"<div class='muted'>{_html_escape(empty_text)}</div>"
+
+    rows: List[str] = []
+    for a in visible[:4]:
+        sev = _advice_severity(a)
+        badge_sev = "bad" if sev == "bad" else ("warn" if sev == "warn" else "info")
+        text = _advice_text(a)
+        if not text:
+            continue
+        rows.append(
+            f"<div class='adviceitem'>"
+            f"<span class='tag {badge_sev}'>{_html_escape(sev)}</span>"
+            f"<span class='msg'>{_html_escape(text)}</span>"
+            f"</div>"
+        )
+
+    return "".join(rows) if rows else f"<div class='muted'>{_html_escape(empty_text)}</div>"
+
+
 def _headline_line(sev: str) -> str:
     sev = (sev or "ok").lower()
     if sev == "bad":
@@ -624,8 +669,14 @@ def _advice_normalised_snapshot(snapshot: Dict[str, Any]) -> List[Dict[str, Any]
                     if msg:
                         out.append(
                             {
+                                "id": a.get("id") or a.get("code"),
                                 "severity": sev,
                                 "message": str(msg),
+                                "recommendation": a.get("recommendation") if a.get("recommendation") else None,
+                                "category": a.get("category"),
+                                "confidence": a.get("confidence"),
+                                "field": a.get("field"),
+                                "value": a.get("value"),
                                 "evidence": a.get("evidence") if isinstance(a.get("evidence"), dict) else {},
                             }
                         )
@@ -644,7 +695,42 @@ def _advice_normalised_snapshot(snapshot: Dict[str, Any]) -> List[Dict[str, Any]
             lvl = _map_engine_sev(lvl)
             msg = a.get("text") or a.get("message") or ""
             if msg:
-                out.append({"severity": lvl, "message": str(msg)})
+                out.append(
+                    {
+                        "severity": lvl,
+                        "message": str(msg),
+                        "recommendation": a.get("recommendation") if a.get("recommendation") else None,
+                        "category": a.get("category"),
+                        "confidence": a.get("confidence"),
+                        "field": a.get("field"),
+                        "value": a.get("value"),
+                        "evidence": a.get("evidence") if isinstance(a.get("evidence"), dict) else {},
+                    }
+                )
+
+    if not out:
+        stored = snapshot.get("advice")
+        if isinstance(stored, list):
+            for a in stored:
+                if not isinstance(a, dict):
+                    continue
+                sev = _map_engine_sev(str(a.get("severity") or a.get("level") or "info"))
+                msg = a.get("message") or a.get("text") or ""
+                rec = a.get("recommendation") or ""
+                if msg or rec:
+                    out.append(
+                        {
+                            "id": a.get("id") or a.get("code"),
+                            "severity": sev,
+                            "message": str(msg or rec),
+                            "recommendation": rec if rec else None,
+                            "category": a.get("category"),
+                            "confidence": a.get("confidence"),
+                            "field": a.get("field"),
+                            "value": a.get("value"),
+                            "evidence": a.get("evidence") if isinstance(a.get("evidence"), dict) else {},
+                        }
+                    )
 
     try:
         facts = snapshot.get("facts") if isinstance(snapshot.get("facts"), dict) else {}
@@ -1336,8 +1422,8 @@ def _top_action(nv: NodeView) -> Optional[Tuple[str, str]]:
         return None
     for sev in ("bad", "warn", "info"):
         for a in nv.advice:
-            if str(a.get("severity") or "").lower() == sev:
-                msg = _safe_str(a.get("message") or "").strip()
+            if _advice_severity(a) == sev:
+                msg = _advice_text(a)
                 if msg:
                     return (sev, msg)
     return None
@@ -1392,8 +1478,8 @@ def _render_advice(advice: List[Dict[str, Any]]) -> str:
         return "<div class='muted'>All clear. (Boring is good.)</div>"
     out: List[str] = []
     for a in advice[:10]:
-        sev = str(a.get("severity") or "ok").lower()
-        msg = _safe_str(a.get("message") or "")
+        sev = _advice_severity(a)
+        msg = _advice_text(a)
         tag_class = "info" if sev == "info" else sev
         out.append(
             f"<div class='adviceitem'><span class='tag {tag_class}'>{_html_escape(sev)}</span>"
@@ -1745,7 +1831,7 @@ def _render_inventory_table(nodeviews: List[NodeView], hours: int) -> str:
 """
 
 
-def _render_advice_queue(nodeviews: List[NodeView]) -> str:
+def _render_advice_queue(nodeviews: List[NodeView], *, include_info: bool = False) -> str:
     items: List[Tuple[int, float, str, str, str, str]] = []
 
     sev_rank = {"stale": 0, "bad": 1, "warn": 2, "info": 3}
@@ -1756,10 +1842,12 @@ def _render_advice_queue(nodeviews: List[NodeView]) -> str:
             continue
 
         for a in nv.advice:
-            sev = str(a.get("severity") or "ok").lower()
+            sev = _advice_severity(a)
             if sev not in ("bad", "warn", "info"):
                 continue
-            msg = _safe_str(a.get("message") or "").strip()
+            if not include_info and sev == "info":
+                continue
+            msg = _advice_text(a)
             if not msg:
                 continue
             items.append((sev_rank.get(sev, 9), -(nv.activity_score), nv.node, sev.upper(), msg, nv.model or ""))

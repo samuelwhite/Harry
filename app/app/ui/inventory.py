@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Tuple
 from app.node_metadata import node_display_name, node_meta_summary, node_route_id, prime_privacy_aliases
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
 from app.ui.capabilities import gpu_state_message, gpu_capability_hint
+from app.ui.fleet import _advice_normalised_snapshot, _render_advice_summary
 
 from .db import (
     _db,
@@ -156,6 +157,7 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
 
     disks = facts.get("disks") if isinstance(facts.get("disks"), list) else []
     gpus = facts.get("gpus") if isinstance(facts.get("gpus"), list) else []
+    advice = _advice_normalised_snapshot(payload)
 
     metrics = _get_metrics(payload)
     if not gpus:
@@ -191,6 +193,7 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
         "disks": clean_list(disks, ["name", "type", "size_gb", "model", "serial"]),
         "gpus": clean_list(gpus, ["name", "driver", "bus_id", "mem_total_mb"]),
         "network_interfaces": clean_list(nics, ["name", "mac", "ip", "ipv4", "ipv6", "speed_mbps", "vendor"]),
+        "advice": advice,
         "capabilities": capabilities,
     }
 
@@ -383,6 +386,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
         disks = r.get("disks") or []
         gpus = r.get("gpus") or []
         nics = r.get("network_interfaces") or []
+        advice = r.get("advice") or []
         capabilities = r.get("capabilities") or {}
 
         table_rows.append(
@@ -434,6 +438,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
     </div>
   </div>
 {_render_network_interfaces_card(nics)}
+{f'<div class="subcard" style="margin-top:12px;"><div class="subcardtitle">Recommendations</div><div class="subcardbody">{_render_advice_summary(advice)}</div></div>' if advice else ''}
 </div>
 """
         )

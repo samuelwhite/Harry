@@ -128,6 +128,43 @@ def test_inventory_page_renders_network_interfaces_when_present(monkeypatch):
     assert "Ethernet" in html
 
 
+def test_inventory_page_renders_node_recommendations(monkeypatch):
+    @contextmanager
+    def fake_db():
+        yield object()
+
+    latest = {
+        "node-1": {
+            "ts": "2026-05-10T12:00:00Z",
+            "payload": {
+                "facts": {
+                    "disks": [{"name": "Disk 1", "type": "NVMe", "size_gb": 512}],
+                },
+                "metrics": {"disk_used": [], "temps_c": {}, "gpu": [], "extensions": {}},
+                "derived": {"health": {"state": "healthy", "worst_severity": "ok", "reasons": []}, "extensions": {}},
+                "advice": [
+                    {
+                        "severity": "warn",
+                        "message": "Storage is getting tight (88%).",
+                        "recommendation": "Plan a cleanup or storage upgrade soon.",
+                    }
+                ],
+            },
+        }
+    }
+
+    monkeypatch.setattr(inventory_ui, "_db", fake_db)
+    monkeypatch.setattr(inventory_ui, "_db_has_ingest", lambda conn: True)
+    monkeypatch.setattr(inventory_ui, "_fetch_latest_per_node", lambda conn: latest)
+
+    html = inventory_ui.render_inventory_page(hours=24, debug=False)
+
+    assert "Recommendations" in html
+    assert "Storage is getting tight (88%)." in html
+    assert "Plan a cleanup or storage upgrade soon." in html
+    assert "node-recommendations" not in html
+
+
 def test_fleet_storage_panel_renders_synology_volume_mounts():
     html = fleet_ui._render_storage_physical(
         [],

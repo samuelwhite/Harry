@@ -571,6 +571,39 @@ def test_diagnostics_hides_recommendations_when_healthy(monkeypatch, tmp_path):
     assert "Healthy systems should feel calm and minimal." in html
 
 
+def test_diagnostics_filters_info_only_advice_from_recommendations(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        diagnostics,
+        "build_nodeviews",
+        lambda hours=72: [
+            SimpleNamespace(
+                stale=False,
+                agent_version="0.2.4",
+                health_state="healthy",
+                advice_sev=None,
+                age_minutes=2,
+                advice=[
+                    {
+                        "severity": "info",
+                        "message": "Memory baseline is elevated (median 62% over ~6h).",
+                        "recommendation": "Not urgent, but it reduces headroom for spikes.",
+                    }
+                ],
+            )
+        ],
+    )
+    monkeypatch.setattr(diagnostics, "_service_summary", lambda: None)
+    monkeypatch.setattr(diagnostics, "_installer_download_issues", lambda: [])
+
+    html = diagnostics.render_diagnostics_page(_make_starlette_request(), hours=72, debug=False)
+
+    assert 'id="recommendations"' in html
+    assert "Restart or update the agents that are stale or behind." in html
+    assert "Memory baseline is elevated" not in html
+
+
 def test_api_page_lists_core_endpoints_and_examples():
     with TestClient(main.app) as client:
         resp = client.get("/api")

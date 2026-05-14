@@ -9,6 +9,7 @@ from app.machine_summary import get_machine_summary
 from app.node_metadata import node_display_name, node_meta_summary, node_route_id, prime_privacy_aliases
 from app.node_metadata import privacy_mode_enabled
 from app.versions import AGENT_VERSION, BRAIN_VERSION
+from app.ui.fleet import _advice_normalised_snapshot, _render_advice_summary
 
 from .db import get_latest_node_record, get_latest_node_records, _load_schema_current, _raw_payload
 from .templates import _html_escape, render_shell
@@ -83,6 +84,7 @@ def render_node_detail(node: str, hours: int) -> str:
 
     raw = _raw_payload(payload)
     summary = get_machine_summary(payload)
+    advice = _advice_normalised_snapshot(payload)
 
     pretty_payload_text = json.dumps(payload, indent=2, ensure_ascii=False)
     pretty_raw_text = json.dumps(raw, indent=2, ensure_ascii=False) if raw else ""
@@ -110,6 +112,23 @@ def render_node_detail(node: str, hours: int) -> str:
 </div>
 """
 
+    advice_html = ""
+    if advice:
+        advice_html = f"""
+<div class="section" id="node-recommendations">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">Recommendations</div>
+      <div class="h2sub">User-actionable guidance for this node.</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    {_render_advice_summary(advice)}
+  </div>
+</div>
+"""
+
     schema_current = _load_schema_current()
     sidebar_footer = (
         f"<strong>Brain</strong> {_html_escape(BRAIN_VERSION)}<br/>"
@@ -127,6 +146,8 @@ def render_node_detail(node: str, hours: int) -> str:
 
     content = f"""
 {summary_html}
+
+{advice_html}
 
 <div class="section" id="normalised-payload">
   <div class="sectionhead">

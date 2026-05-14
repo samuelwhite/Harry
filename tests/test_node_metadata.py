@@ -278,3 +278,54 @@ def test_node_detail_uses_display_name_and_metadata(monkeypatch):
 
     assert "Example Node" in html
     assert "Media Server · NAS · Rack Shelf · gpu, llm, automation" in html
+
+
+def test_node_detail_renders_recommendations_when_present(monkeypatch):
+    monkeypatch.setattr(node_ui, "get_machine_summary", lambda payload: None)
+    monkeypatch.setattr(node_ui, "get_latest_node_records", lambda: {"node-1": {"ts": "2026-05-07T12:00:00Z", "payload": {}}})
+    monkeypatch.setattr(
+        node_ui,
+        "get_latest_node_record",
+        lambda node: {
+            "ts": "2026-05-07T12:00:00Z",
+            "payload": """
+            {
+              "node": "node-1",
+              "ts": "2026-05-07T12:00:00Z",
+              "facts": {},
+              "metrics": {"disk_used": [], "temps_c": {}, "gpu": [], "extensions": {}},
+              "derived": {"health": {"state": "healthy", "worst_severity": "ok", "reasons": []}, "extensions": {}},
+              "advice": [
+                {
+                  "severity": "warn",
+                  "message": "Memory usage is high (86%).",
+                  "recommendation": "Keep an eye on it; tune services or plan a RAM upgrade if this is typical."
+                }
+              ]
+            }
+            """,
+        },
+    )
+
+    html = node_ui.render_node_detail("node-1", hours=72)
+
+    assert 'id="node-recommendations"' in html
+    assert "Memory usage is high (86%)." in html
+    assert "RAM upgrade" in html
+
+
+def test_node_detail_stays_calm_when_no_recommendations_exist(monkeypatch):
+    monkeypatch.setattr(node_ui, "get_machine_summary", lambda payload: None)
+    monkeypatch.setattr(node_ui, "get_latest_node_records", lambda: {"node-1": {"ts": "2026-05-07T12:00:00Z", "payload": {}}})
+    monkeypatch.setattr(
+        node_ui,
+        "get_latest_node_record",
+        lambda node: {
+            "ts": "2026-05-07T12:00:00Z",
+            "payload": "{\"node\":\"node-1\",\"ts\":\"2026-05-07T12:00:00Z\",\"facts\":{},\"metrics\":{\"disk_used\":[],\"temps_c\":{},\"gpu\":[],\"extensions\":{}},\"derived\":{\"health\":{\"state\":\"healthy\",\"worst_severity\":\"ok\",\"reasons\":[]},\"extensions\":{}},\"advice\":[]}",
+        },
+    )
+
+    html = node_ui.render_node_detail("node-1", hours=72)
+
+    assert 'id="node-recommendations"' not in html
