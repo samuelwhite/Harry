@@ -19,3 +19,31 @@ def test_install_sh_stages_agent_script_into_packaged_scripts():
     script = Path("install.sh").read_text(encoding="utf-8")
 
     assert 'cp -a "$SCRIPT_DIR/agent/harry_agent.sh" "$INSTALL_DIR/scripts/harry_agent.sh"' in script
+
+
+def test_install_agent_supports_synology_dsm_mode():
+    script = Path("scripts/install-agent.sh").read_text(encoding="utf-8")
+
+    assert "detect_platform" in script
+    assert "synology-dsm" in script
+    assert "linux-systemd" in script
+    assert "linux-generic" in script
+    assert "resolve_synology_install_root" in script
+    assert "run-harry-agent.sh" in script
+    assert "HARRY_STATUS_DIR" in script
+    assert "HARRY_BRAIN_URL_CACHE_FILE" in script
+    assert "Task Scheduler" in script
+    assert "/usr/syno/bin:/usr/syno/sbin" in script
+
+
+def test_update_harry_script_describes_safe_update_flow():
+    script = Path("scripts/update-harry.sh").read_text(encoding="utf-8")
+
+    assert "git stash push --include-untracked" in script
+    assert "git pull" in script
+    assert "docker compose up -d --build" in script
+    assert "chmod +x \"$AGENT_SCRIPT\"" in script
+    assert "chmod o+x \"$ROOT_DIR\" \"$ROOT_DIR/agent\"" in script
+    assert "systemctl daemon-reload" in script
+    assert "harry-agent.service" in script
+    assert "docker compose ps" in script

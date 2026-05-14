@@ -549,6 +549,29 @@ def _downloads_fallback_help_html() -> str:
 """
 
 
+def _downloads_synology_help_html() -> str:
+    return """
+<section class="section" id="downloads-synology">
+  <div class="card" style="padding:18px 20px;">
+    <div class="sectionhead" style="margin-bottom:12px;">
+      <div>
+        <div class="h2">Synology NAS</div>
+        <div class="h2sub">Use SSH for the install, then schedule the wrapper in DSM Task Scheduler.</div>
+      </div>
+    </div>
+
+    <div class="subtitle">1. Enable SSH in Control Panel &gt; Terminal &amp; SNMP.</div>
+    <div class="subtitle" style="margin-top:8px;">2. From SSH, run the Linux installer from this Brain.</div>
+    <div class="subtitle" style="margin-top:10px;"><code>curl -fsSL http://&lt;brain-ip&gt;:8789/downloads/linux-agent | sudo -E bash</code></div>
+    <div class="subtitle" style="margin-top:8px;">3. If prompted, use automatic discovery or paste the Brain address shown above.</div>
+    <div class="subtitle" style="margin-top:8px;">4. If you want a recurring DSM task, create Control Panel &gt; Task Scheduler &gt; Create &gt; Scheduled Task &gt; User-defined script and paste the command printed by the installer.</div>
+    <div class="subtitle" style="margin-top:8px;">Manual check: <code>./run-harry-agent.sh</code></div>
+    <div class="subtitle" style="margin-top:8px;">If it works manually but not on schedule, check full paths, <code>PATH</code>, and the Task Scheduler logs.</div>
+  </div>
+</section>
+"""
+
+
 def _downloads_advanced_help_html() -> str:
     return """
 <section class="section" id="downloads-advanced">
@@ -710,9 +733,11 @@ def downloads_page(request: Request) -> HTMLResponse:
 """
 
     warning_html = _downloads_fallback_help_html() if (warning or needs_guidance) else ""
+    synology_html = _downloads_synology_help_html()
     advanced_html = _downloads_advanced_help_html()
     content = f"""
     {warning_html}
+    {synology_html}
 
 <section class="section" id="downloads-overview">
   <div class="card">

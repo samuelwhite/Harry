@@ -376,6 +376,17 @@ def test_downloads_removes_local_only_block(monkeypatch, tmp_path):
     assert "mDNS" not in html
 
 
+def test_downloads_includes_synology_guidance(monkeypatch, tmp_path):
+    html = _render_downloads(monkeypatch, tmp_path)
+
+    assert "Synology NAS" in html
+    assert "Task Scheduler" in html
+    assert "Enable SSH" in html
+    assert "curl -fsSL http://&lt;brain-ip&gt;:8789/downloads/linux-agent | sudo -E bash" in html
+    assert "./run-harry-agent.sh" in html
+    assert "PATH" in html
+
+
 def test_downloads_uses_request_host_lan_ip(monkeypatch):
     monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
     monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)

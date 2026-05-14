@@ -67,7 +67,7 @@ To verify the installer path:
 
 The installers should reflect Brain `2026.05.15`, Agent `0.2.5`, and Schema `0.2.3`.
 
-Harry’s stable Windows installer artifacts are committed in `downloads/`, so a normal `git pull` or `update-harry` refreshes them with the repo.
+Harry’s stable Windows installer artifacts are committed in `downloads/`, so a normal `git pull` or `sudo /opt/harry/scripts/update-harry.sh` refreshes them with the repo.
 
 For an optional manual build-and-copy flow:
 
@@ -127,6 +127,14 @@ Health: http://localhost:8787/health
 Public agent address example: HARRY_PUBLIC_BASE_URL=http://<brain-ip>:8789
 Public agent LAN override: HARRY_BRAIN_LAN_IP=<brain-ip> HARRY_PUBLIC_PORT=8789
 
+When you want to refresh a local Brain checkout safely:
+
+`sudo /opt/harry/scripts/update-harry.sh`
+
+Optional alias:
+
+`alias update-harry='sudo /opt/harry/scripts/update-harry.sh'`
+
 ---
 
 ## ➕ Add another machine
@@ -148,6 +156,14 @@ It provides:
 export HARRY_PUBLIC_BASE_URL="http://<brain-ip>:8789"
 
 curl -fsSL "$HARRY_PUBLIC_BASE_URL/scripts/install-agent.sh" | sudo -E bash
+
+### Synology NAS
+
+Enable SSH on the NAS, then run the Linux installer command from a shell:
+
+`curl -fsSL "http://<brain-ip>:8789/downloads/linux-agent" | sudo -E bash`
+
+If DSM scheduling is needed, create a Control Panel > Task Scheduler > Create > Scheduled Task > User-defined script task and paste the command printed by the installer.
 
 ---
 
