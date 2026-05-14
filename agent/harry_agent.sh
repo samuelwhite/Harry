@@ -488,6 +488,105 @@ resource_backoff_skip() {
   echo "  ${summary}" >&2
 }
 
+read_meminfo_kb() {
+  local key="$1"
+  awk -v key="${key}:" '$1 == key { print $2; exit }' /proc/meminfo 2>/dev/null || true
+}
+
+HARRY_MEM_METHOD=""
+HARRY_MEM_TOTAL_KB=""
+HARRY_MEM_USED_KB=""
+HARRY_MEM_AVAILABLE_KB=""
+HARRY_MEM_FREE_KB=""
+HARRY_MEM_BUFFERS_KB=""
+HARRY_MEM_CACHED_KB=""
+HARRY_MEM_SRECLAIMABLE_KB=""
+HARRY_MEM_USED_PCT=""
+
+collect_memory_snapshot() {
+  local platform total_kb free_kb buffers_kb cached_kb sreclaimable_kb available_kb used_kb method free_snapshot
+  platform="${HARRY_PLATFORM:-$(detect_platform)}"
+
+  total_kb="$(read_meminfo_kb MemTotal)"
+  free_kb="$(read_meminfo_kb MemFree)"
+  buffers_kb="$(read_meminfo_kb Buffers)"
+  cached_kb="$(read_meminfo_kb Cached)"
+  sreclaimable_kb="$(read_meminfo_kb SReclaimable)"
+  available_kb="$(read_meminfo_kb MemAvailable)"
+
+  if [ -n "$total_kb" ] && [ "$total_kb" -gt 0 ]; then
+    if [ "$platform" = "synology-dsm" ] && [ -n "$free_kb" ] && [ -n "$buffers_kb" ] && [ -n "$cached_kb" ] && [ -n "$sreclaimable_kb" ]; then
+      used_kb=$(( total_kb - free_kb - buffers_kb - cached_kb - sreclaimable_kb ))
+      [ "$used_kb" -lt 0 ] && used_kb=0
+      available_kb=$(( total_kb - used_kb ))
+      [ "$available_kb" -lt 0 ] && available_kb=0
+      method="calculated_cache_adjusted"
+    elif [ -n "$available_kb" ]; then
+      used_kb=$(( total_kb - available_kb ))
+      [ "$used_kb" -lt 0 ] && used_kb=0
+      method="memavailable"
+    elif [ -n "$free_kb" ] && [ -n "$buffers_kb" ] && [ -n "$cached_kb" ] && [ -n "$sreclaimable_kb" ]; then
+      used_kb=$(( total_kb - free_kb - buffers_kb - cached_kb - sreclaimable_kb ))
+      [ "$used_kb" -lt 0 ] && used_kb=0
+      available_kb=$(( total_kb - used_kb ))
+      [ "$available_kb" -lt 0 ] && available_kb=0
+      method="calculated_cache_adjusted"
+    fi
+  fi
+
+  if [ -z "${method:-}" ] && command -v free >/dev/null 2>&1; then
+    free_snapshot="$(
+      free -k 2>/dev/null | awk '/^Mem:/ { print $2 "," $3 "," $4 "," $7; exit }' 2>/dev/null || true
+    )"
+    if [ -n "$free_snapshot" ]; then
+      IFS=, read -r total_kb used_kb free_kb available_kb <<EOF
+$free_snapshot
+EOF
+      [ -n "${used_kb:-}" ] || used_kb=0
+      method="fallback"
+    fi
+  fi
+
+  if [ -n "${total_kb:-}" ] && [ -n "${used_kb:-}" ] && [ "$total_kb" -gt 0 ]; then
+    HARRY_MEM_USED_PCT="$(
+      TOTAL_KB="$total_kb" USED_KB="$used_kb" "$PYTHON" - <<'PY'
+import os
+try:
+    total = float(os.environ.get("TOTAL_KB", "0") or 0)
+    used = float(os.environ.get("USED_KB", "0") or 0)
+    if total > 0:
+        print(f"{(100.0 * used / total):.2f}")
+except Exception:
+    pass
+PY
+    )"
+  fi
+
+  HARRY_MEM_METHOD="${method:-}"
+  HARRY_MEM_TOTAL_KB="${total_kb:-}"
+  HARRY_MEM_USED_KB="${used_kb:-}"
+  HARRY_MEM_AVAILABLE_KB="${available_kb:-}"
+  HARRY_MEM_FREE_KB="${free_kb:-}"
+  HARRY_MEM_BUFFERS_KB="${buffers_kb:-}"
+  HARRY_MEM_CACHED_KB="${cached_kb:-}"
+  HARRY_MEM_SRECLAIMABLE_KB="${sreclaimable_kb:-}"
+
+  export HARRY_MEM_METHOD \
+    HARRY_MEM_TOTAL_KB \
+    HARRY_MEM_USED_KB \
+    HARRY_MEM_AVAILABLE_KB \
+    HARRY_MEM_FREE_KB \
+    HARRY_MEM_BUFFERS_KB \
+    HARRY_MEM_CACHED_KB \
+    HARRY_MEM_SRECLAIMABLE_KB \
+    HARRY_MEM_USED_PCT
+
+  log_fail "memory_method node=${HARRY_NODE} platform=${HARRY_PLATFORM} method=${HARRY_MEM_METHOD:-unknown} total_kb=${HARRY_MEM_TOTAL_KB:-} used_kb=${HARRY_MEM_USED_KB:-} used_pct=${HARRY_MEM_USED_PCT:-} available_kb=${HARRY_MEM_AVAILABLE_KB:-} free_kb=${HARRY_MEM_FREE_KB:-}"
+  echo "DEBUG: memory method=${HARRY_MEM_METHOD:-unknown} platform=${HARRY_PLATFORM} total_kb=${HARRY_MEM_TOTAL_KB:-} used_kb=${HARRY_MEM_USED_KB:-} used_pct=${HARRY_MEM_USED_PCT:-}" >&2
+}
+
+collect_memory_snapshot
+
 if [ "$BACKOFF_ENABLE" = "1" ]; then
   CORES="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1)"
   CORES="${CORES:-1}"
@@ -495,16 +594,6 @@ if [ "$BACKOFF_ENABLE" = "1" ]; then
   LOAD1=""
   if [ -r /proc/loadavg ]; then
     LOAD1="$(awk '{print $1}' /proc/loadavg 2>/dev/null || true)"
-  fi
-
-  MEM_USED=""
-  if [ -r /proc/meminfo ]; then
-    MEM_USED="$(
-      awk '
-        /^MemTotal:/ {t=$2}
-        /^MemAvailable:/ {a=$2}
-        END { if (t>0) printf "%.2f", (100.0*(t-a)/t); }' /proc/meminfo 2>/dev/null || true
-    )"
   fi
 
   if [ -n "$LOAD1" ]; then
@@ -527,13 +616,13 @@ PY
     fi
   fi
 
-  if [ -n "$MEM_USED" ]; then
+  if [ -n "$HARRY_MEM_USED_PCT" ]; then
     TOO_FULL="$(
-      MEM_USED="$MEM_USED" MAX_MEM_USED_PCT="$MAX_MEM_USED_PCT" \
+      MEM_USED_PCT="$HARRY_MEM_USED_PCT" MAX_MEM_USED_PCT="$MAX_MEM_USED_PCT" \
       "$PYTHON" - <<'PY'
 import os
 try:
-    m   = float(os.environ.get("MEM_USED", "0") or 0)
+    m   = float(os.environ.get("MEM_USED_PCT", "0") or 0)
     thr = float(os.environ.get("MAX_MEM_USED_PCT", "92") or 92)
     print("1" if m > thr else "0")
 except Exception:
@@ -542,7 +631,7 @@ PY
     )"
     if [ "$TOO_FULL" = "1" ]; then
       RESOURCE_BACKOFF_REASON="${RESOURCE_BACKOFF_REASON:+${RESOURCE_BACKOFF_REASON},}memory_pressure"
-      RESOURCE_BACKOFF_DETAILS="${RESOURCE_BACKOFF_DETAILS:+${RESOURCE_BACKOFF_DETAILS} }mem_used=${MEM_USED} threshold=${MAX_MEM_USED_PCT}"
+      RESOURCE_BACKOFF_DETAILS="${RESOURCE_BACKOFF_DETAILS:+${RESOURCE_BACKOFF_DETAILS} }mem_used_pct=${HARRY_MEM_USED_PCT} threshold=${MAX_MEM_USED_PCT} method=${HARRY_MEM_METHOD:-unknown}"
     fi
   fi
 
@@ -664,6 +753,132 @@ def read_cpuinfo_model():
         if key.strip().lower() == "model name" and value.strip():
             return value.strip()
     return None
+
+def env_int(name):
+    return to_int(os.environ.get(name))
+
+def env_float(name):
+    try:
+        value = os.environ.get(name)
+        if value is None:
+            return None
+        s = str(value).strip()
+        if not s:
+            return None
+        return float(s)
+    except Exception:
+        return None
+
+def memory_snapshot_from_env():
+    total_kb = env_int("HARRY_MEM_TOTAL_KB")
+    used_kb = env_int("HARRY_MEM_USED_KB")
+    if total_kb is None or used_kb is None:
+        return None
+
+    available_kb = env_int("HARRY_MEM_AVAILABLE_KB")
+    free_kb = env_int("HARRY_MEM_FREE_KB")
+    buffers_kb = env_int("HARRY_MEM_BUFFERS_KB")
+    cached_kb = env_int("HARRY_MEM_CACHED_KB")
+    sreclaimable_kb = env_int("HARRY_MEM_SRECLAIMABLE_KB")
+    method = (os.environ.get("HARRY_MEM_METHOD") or "").strip() or "env"
+
+    used_pct = env_float("HARRY_MEM_USED_PCT")
+    if used_pct is None and total_kb > 0:
+        used_pct = (used_kb / total_kb) * 100.0
+
+    if available_kb is None and total_kb >= used_kb:
+        available_kb = total_kb - used_kb
+
+    return {
+        "method": method,
+        "total_kb": total_kb,
+        "used_kb": used_kb,
+        "used_percent": used_pct,
+        "available_kb": available_kb,
+        "free_kb": free_kb,
+        "buffers_kb": buffers_kb,
+        "cached_kb": cached_kb,
+        "sreclaimable_kb": sreclaimable_kb,
+    }
+
+def memory_snapshot_from_proc():
+    d = {}
+    try:
+        for line in read("/proc/meminfo").splitlines():
+            m = re.match(r"^(\w+):\s+(\d+)", line)
+            if m:
+                d[m.group(1)] = int(m.group(2))
+    except Exception:
+        return None
+
+    total_kb = d.get("MemTotal")
+    if not total_kb:
+        return None
+
+    free_kb = d.get("MemFree")
+    buffers_kb = d.get("Buffers")
+    cached_kb = d.get("Cached")
+    sreclaimable_kb = d.get("SReclaimable")
+    available_kb = d.get("MemAvailable")
+    used_kb = None
+    method = None
+
+    if (
+        platform == "synology-dsm"
+        and free_kb is not None
+        and buffers_kb is not None
+        and cached_kb is not None
+        and sreclaimable_kb is not None
+    ):
+        used_kb = total_kb - free_kb - buffers_kb - cached_kb - sreclaimable_kb
+        method = "calculated_cache_adjusted"
+    elif available_kb is not None:
+        used_kb = total_kb - available_kb
+        method = "memavailable"
+    elif (
+        free_kb is not None
+        and buffers_kb is not None
+        and cached_kb is not None
+        and sreclaimable_kb is not None
+    ):
+        used_kb = total_kb - free_kb - buffers_kb - cached_kb - sreclaimable_kb
+        method = "calculated_cache_adjusted"
+
+    if used_kb is None and which("free"):
+        txt = run(["free", "-k"])
+        for line in txt.splitlines():
+            if not line.startswith("Mem:"):
+                continue
+            parts = line.split()
+            if len(parts) >= 7:
+                total_kb = to_int(parts[1])
+                used_kb = to_int(parts[2])
+                free_kb = to_int(parts[3])
+                available_kb = to_int(parts[6])
+                buffers_kb = None
+                cached_kb = None
+                sreclaimable_kb = None
+                method = "fallback"
+            break
+
+    if total_kb is None or used_kb is None:
+        return None
+
+    used_kb = max(int(used_kb), 0)
+    if available_kb is None and total_kb >= used_kb:
+        available_kb = total_kb - used_kb
+    used_percent = (used_kb / total_kb) * 100.0 if total_kb else None
+    return {
+        "method": method or "fallback",
+        "total_kb": total_kb,
+        "used_kb": used_kb,
+        "used_percent": used_percent,
+        "available_kb": available_kb,
+        "free_kb": free_kb,
+        "buffers_kb": buffers_kb,
+        "cached_kb": cached_kb,
+        "sreclaimable_kb": sreclaimable_kb,
+    }
 
 platform = (os.environ.get("HARRY_PLATFORM") or "").strip() or detect_platform()
 synology_info = read_kv_file("/etc.defaults/VERSION") if platform == "synology-dsm" else {}
@@ -797,21 +1012,29 @@ if platform == "synology-dsm" and synology_info:
 os_pretty_name = os_release.get("PRETTY_NAME") or os_release.get("NAME") or None
 os_id = os_release.get("ID") or None
 
-meminfo = read("/proc/meminfo")
+memory_snapshot = memory_snapshot_from_env() or memory_snapshot_from_proc()
+memory_total_kb = None
+memory_used_kb = None
+memory_available_kb = None
+memory_free_kb = None
+memory_buffers_kb = None
+memory_cached_kb = None
+memory_sreclaimable_kb = None
+memory_method = None
 mem_used_pct = None
 try:
-    d = {}
-    for line in meminfo.splitlines():
-        m = re.match(r"^(\w+):\s+(\d+)", line)
-        if m:
-            d[m.group(1)] = int(m.group(2))
-    total_kb = d.get("MemTotal", 0)
-    avail_kb = d.get("MemAvailable", 0)
-    if total_kb > 0:
-        used = total_kb - avail_kb
-        mem_used_pct = (used / total_kb) * 100.0
-        if ram_total_gb is None:
-            ram_total_gb = int(round(total_kb / 1024 / 1024))
+    if memory_snapshot:
+        memory_method = memory_snapshot.get("method")
+        memory_total_kb = memory_snapshot.get("total_kb")
+        memory_used_kb = memory_snapshot.get("used_kb")
+        memory_available_kb = memory_snapshot.get("available_kb")
+        memory_free_kb = memory_snapshot.get("free_kb")
+        memory_buffers_kb = memory_snapshot.get("buffers_kb")
+        memory_cached_kb = memory_snapshot.get("cached_kb")
+        memory_sreclaimable_kb = memory_snapshot.get("sreclaimable_kb")
+        mem_used_pct = memory_snapshot.get("used_percent")
+        if ram_total_gb is None and memory_total_kb:
+            ram_total_gb = int(round(memory_total_kb / 1024 / 1024))
 except Exception:
     pass
 
@@ -1087,6 +1310,17 @@ if platform == "synology-dsm":
 
 metrics_extensions = {
     "disk_physical": disk_physical,
+    "memory": {
+        "method": memory_method,
+        "total_kb": memory_total_kb,
+        "used_kb": memory_used_kb,
+        "used_percent": mem_used_pct,
+        "available_kb": memory_available_kb,
+        "free_kb": memory_free_kb,
+        "buffers_kb": memory_buffers_kb,
+        "cached_kb": memory_cached_kb,
+        "sreclaimable_kb": memory_sreclaimable_kb,
+    },
 }
 
 payload = {
@@ -1115,6 +1349,11 @@ payload = {
     "metrics": {
       "cpu_load_1m": load1,
       "mem_used_pct": mem_used_pct,
+      "memory_total_kb": memory_total_kb,
+      "memory_used_kb": memory_used_kb,
+      "memory_available_kb": memory_available_kb,
+      "memory_free_kb": memory_free_kb,
+      "memory_method": memory_method,
       "disk_used": disk_used,
       "temps_c": temps,
       "gpu": gpus,

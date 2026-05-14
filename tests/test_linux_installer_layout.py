@@ -247,6 +247,71 @@ def test_linux_agent_resource_backoff_writes_status_and_log(tmp_path):
     assert 'resource_backoff|reason=memory_pressure mem_used=100.00 threshold=92 telemetry_skipped' in status_file.read_text(encoding="utf-8")
 
 
+def test_linux_agent_uses_shared_dsm_memory_snapshot_for_backoff_and_telemetry():
+    script = Path("agent/harry_agent.sh").read_text(encoding="utf-8")
+
+    assert "collect_memory_snapshot" in script
+    assert "memory_snapshot_from_env" in script
+    assert "memory_snapshot_from_proc" in script
+    assert "HARRY_MEM_USED_PCT" in script
+    assert "memory_method" in script
+    assert "calculated_cache_adjusted" in script
+    assert "memavailable" in script
+    assert "fallback" in script
+
+
+def test_synology_memory_uses_cache_adjusted_calculation_when_memavailable_is_bad(tmp_path):
+    script = Path("agent/harry_agent.sh").read_text(encoding="utf-8")
+    meminfo = tmp_path / "meminfo"
+    meminfo.write_text(
+        "\n".join(
+            [
+                "MemTotal:       8000000 kB",
+                "MemFree:        6000000 kB",
+                "Buffers:         100000 kB",
+                "Cached:         1200000 kB",
+                "SReclaimable:     200000 kB",
+                "MemAvailable:      50000 kB",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    snippet = _write_shell_snippet(
+        tmp_path,
+        script,
+        ["read_meminfo_kb", "collect_memory_snapshot"],
+        replacements={"/proc/meminfo": meminfo.as_posix()},
+    )
+
+    env = os.environ.copy()
+    env["HARRY_PLATFORM"] = "synology-dsm"
+    env["HARRY_NODE"] = "nas-1"
+    env["PYTHON"] = "python"
+
+    log_file = tmp_path / "harry.log"
+    cmd = (
+        f'LOG_FILE="{log_file.as_posix()}"; '
+        'log_fail(){ printf "%s\\n" "$1" >> "$LOG_FILE"; }; '
+        f'source "{snippet.as_posix()}"; '
+        'collect_memory_snapshot; '
+        'printf "%s|%s|%s|%s|%s\\n" '
+        '"$HARRY_MEM_METHOD" "$HARRY_MEM_USED_PCT" "$HARRY_MEM_USED_KB" "$HARRY_MEM_AVAILABLE_KB" "$HARRY_MEM_FREE_KB"'
+    )
+
+    result = subprocess.run([_bash_exe(), "-lc", cmd], env=env, capture_output=True, text=True, check=True)
+
+    method, used_pct, used_kb, available_kb, free_kb = result.stdout.strip().split("|")
+    assert method == "calculated_cache_adjusted"
+    assert used_kb == "500000"
+    assert available_kb == "7500000"
+    assert free_kb == "6000000"
+    assert used_pct == "6.25"
+    assert "DEBUG: memory method=calculated_cache_adjusted" in result.stderr
+    assert "memory_method node=nas-1 platform=synology-dsm method=calculated_cache_adjusted" in log_file.read_text(encoding="utf-8")
+
+
 def test_update_harry_script_describes_safe_update_flow():
     script = Path("scripts/update-harry.sh").read_text(encoding="utf-8")
 
