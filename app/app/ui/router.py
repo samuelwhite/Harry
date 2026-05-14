@@ -562,7 +562,7 @@ def _downloads_synology_help_html() -> str:
 
     <div class="subtitle">1. Enable SSH in Control Panel &gt; Terminal &amp; SNMP.</div>
     <div class="subtitle" style="margin-top:8px;">2. From SSH, run the Linux installer from this Brain.</div>
-    <div class="subtitle" style="margin-top:10px;"><code>curl -fsSL http://&lt;brain-ip&gt;:8789/downloads/linux-agent | sudo -E bash</code></div>
+    <div class="subtitle" style="margin-top:10px;"><code>sudo HARRY_PLATFORM="synology-dsm" curl -fsSL http://&lt;brain-ip&gt;:8789/downloads/linux-agent | bash</code></div>
     <div class="subtitle" style="margin-top:8px;">3. If prompted, use automatic discovery or paste the Brain address shown above.</div>
     <div class="subtitle" style="margin-top:8px;">4. If you want a recurring DSM task, create Control Panel &gt; Task Scheduler &gt; Create &gt; Scheduled Task &gt; User-defined script and paste the command printed by the installer.</div>
     <div class="subtitle" style="margin-top:8px;">Manual check: <code>./run-harry-agent.sh</code></div>

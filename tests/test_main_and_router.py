@@ -382,7 +382,7 @@ def test_downloads_includes_synology_guidance(monkeypatch, tmp_path):
     assert "Synology NAS" in html
     assert "Task Scheduler" in html
     assert "Enable SSH" in html
-    assert "curl -fsSL http://&lt;brain-ip&gt;:8789/downloads/linux-agent | sudo -E bash" in html
+    assert 'sudo HARRY_PLATFORM="synology-dsm" curl -fsSL http://&lt;brain-ip&gt;:8789/downloads/linux-agent | bash' in html
     assert "./run-harry-agent.sh" in html
     assert "PATH" in html
 

@@ -103,6 +103,13 @@ install_optional_enrichers() {
 }
 
 detect_platform() {
+  case "${HARRY_PLATFORM:-}" in
+    synology-dsm|linux-systemd|linux-generic)
+      echo "$HARRY_PLATFORM"
+      return 0
+      ;;
+  esac
+
   if [ -f /etc.defaults/VERSION ] && [ -f /etc/synoinfo.conf ]; then
     echo "synology-dsm"
     return 0
@@ -592,8 +599,11 @@ EOF_TIMER
   echo "==> Reloading systemd"
   systemctl daemon-reload
 
-  echo "==> Enabling and starting harry-agent.timer"
-  systemctl enable --now harry-agent.timer
+  echo "==> Enabling harry-agent.timer"
+  systemctl enable harry-agent.timer
+
+  echo "==> Starting harry-agent.timer"
+  systemctl start harry-agent.timer
 
   echo "==> Triggering immediate first agent run"
   if systemctl start harry-agent.service; then

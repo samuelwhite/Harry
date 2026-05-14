@@ -161,7 +161,7 @@ curl -fsSL "$HARRY_PUBLIC_BASE_URL/scripts/install-agent.sh" | sudo -E bash
 
 Enable SSH on the NAS, then run the Linux installer command from a shell:
 
-`curl -fsSL "http://<brain-ip>:8789/downloads/linux-agent" | sudo -E bash`
+`sudo HARRY_PLATFORM="synology-dsm" curl -fsSL "http://<brain-ip>:8789/downloads/linux-agent" | bash`
 
 If DSM scheduling is needed, create a Control Panel > Task Scheduler > Create > Scheduled Task > User-defined script task and paste the command printed by the installer.
 

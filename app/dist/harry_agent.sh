@@ -35,6 +35,13 @@ log_fail() {
 }
 
 detect_platform() {
+  case "${HARRY_PLATFORM:-}" in
+    synology-dsm|linux-systemd|linux-generic)
+      echo "$HARRY_PLATFORM"
+      return 0
+      ;;
+  esac
+
   if [ -f /etc.defaults/VERSION ] && [ -f /etc/synoinfo.conf ]; then
     echo "synology-dsm"
     return 0
@@ -605,6 +612,9 @@ def read_kv_file(path: str):
     return data
 
 def detect_platform():
+    override = (os.environ.get("HARRY_PLATFORM") or "").strip()
+    if override in ("synology-dsm", "linux-systemd", "linux-generic"):
+        return override
     if os.path.exists("/etc.defaults/VERSION") and os.path.exists("/etc/synoinfo.conf"):
         return "synology-dsm"
     if os.path.exists("/run/systemd/system") or which("systemctl"):
