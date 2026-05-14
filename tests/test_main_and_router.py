@@ -387,6 +387,15 @@ def test_downloads_includes_synology_guidance(monkeypatch, tmp_path):
     assert "PATH" in html
 
 
+def test_downloads_linux_agent_prefers_live_installer_source(monkeypatch, tmp_path):
+    _setup_temp_db(monkeypatch, tmp_path)
+    monkeypatch.setattr(router, "_downloads_dir", lambda: tmp_path)
+
+    response = router.download_linux_agent()
+
+    assert Path(response.path) == Path("scripts/install-agent.sh").resolve()
+
+
 def test_downloads_uses_request_host_lan_ip(monkeypatch):
     monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
     monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)

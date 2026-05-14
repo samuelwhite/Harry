@@ -164,6 +164,31 @@ resolve_synology_install_root() {
   return 1
 }
 
+read_configured_value() {
+  local file="$1"
+  shift
+  local key line value
+
+  if [ ! -f "$file" ]; then
+    return 1
+  fi
+
+  for key in "$@"; do
+    line="$(
+      grep -m1 -E "${key}=" "$file" 2>/dev/null || true
+    )"
+    if [ -n "$line" ]; then
+      value="${line#*${key}=}"
+      value="${value#\"}"
+      value="${value%\"}"
+      printf '%s\n' "$value"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 current_configured_base_url() {
   local platform="${1:-}"
   local install_root="${2:-}"
@@ -172,12 +197,7 @@ current_configured_base_url() {
   local value=""
 
   if [ "$platform" = "linux-systemd" ] && [ -f "$service_file" ]; then
-    value="$(
-      awk -F= '
-        /Environment="HARRY_PUBLIC_BASE_URL=/ {print $2; exit}
-        /Environment="HARRY_BASE_URL=/ {print $2; exit}
-      ' "$service_file" | sed 's/"$//'
-    )"
+    value="$(read_configured_value "$service_file" HARRY_PUBLIC_BASE_URL HARRY_BASE_URL || true)"
     if [ -n "$value" ]; then
       echo "$value"
       return 0
@@ -185,12 +205,7 @@ current_configured_base_url() {
   fi
 
   if [ "$platform" = "synology-dsm" ] && [ -f "$env_file" ]; then
-    value="$(
-      awk -F= '
-        /^HARRY_PUBLIC_BASE_URL=/ {print $2; exit}
-        /^HARRY_BASE_URL=/ {print $2; exit}
-      ' "$env_file" | sed 's/"$//'
-    )"
+    value="$(read_configured_value "$env_file" HARRY_PUBLIC_BASE_URL HARRY_BASE_URL || true)"
     if [ -n "$value" ]; then
       echo "$value"
       return 0
@@ -206,6 +221,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 PLATFORM="$(detect_platform)"
+echo "Detected platform: ${PLATFORM}"
 
 if [ "$PLATFORM" = "synology-dsm" ]; then
   if ! need_cmd python3 && ! need_cmd python; then
@@ -224,11 +240,14 @@ if [ "$PLATFORM" = "synology-dsm" ]; then
   fi
   AGENT_DIR="${INSTALL_ROOT%/}/agent"
   AGENT_PATH="${AGENT_DIR}/harry_agent.sh"
+  echo "Install mode: DSM Task Scheduler wrapper"
+  echo "Install root: ${INSTALL_ROOT}"
 else
   if ! need_cmd systemctl; then
     echo "ERROR: systemctl not found. Harry agent installer currently requires systemd outside Synology DSM." >&2
     exit 1
   fi
+  echo "Install mode: systemd timer"
 fi
 
 if ! need_cmd bash; then

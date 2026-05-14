@@ -929,13 +929,26 @@ def download_windows_update_script() -> FileResponse:
     )
 
 
+def _linux_agent_installer_path() -> Path:
+    candidates = [
+        Path(__file__).resolve().parents[3] / "scripts" / "install-agent.sh",
+        _downloads_dir() / "HarryAgentInstall.sh",
+    ]
+
+    for path in candidates:
+        if path.exists() and path.is_file():
+            return path
+
+    return candidates[-1]
+
+
 @router.get("/downloads/linux-agent")
 def download_linux_agent() -> FileResponse:
-    path = _downloads_dir() / "HarryAgentInstall.sh"
+    path = _linux_agent_installer_path()
     if not path.exists() or not path.is_file():
         raise HTTPException(
             status_code=404,
-            detail="Linux agent installer not found. Expected downloads/HarryAgentInstall.sh.",
+            detail="Linux agent installer not found. Expected scripts/install-agent.sh or downloads/HarryAgentInstall.sh.",
         )
 
     return FileResponse(
