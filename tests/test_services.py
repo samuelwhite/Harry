@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
 import app.config as config
 import app.main as main
+import app.ui.diagnostics as diagnostics
 from app import service_awareness as sa
 from app.ui import fleet as fleet_ui
 from app.ui import db as dbmod
@@ -143,6 +145,21 @@ def test_render_fleet_live_explains_missing_machine_telemetry_when_brain_is_onli
 
     assert "Local telemetry agent" in html
     assert "not reporting right now" in html
+
+
+def test_agent_summary_separates_current_behind_and_unknown_versions():
+    nodeviews = [
+        SimpleNamespace(agent_version="0.2.5", stale=False),
+        SimpleNamespace(agent_version="0.2.4", stale=False),
+        SimpleNamespace(agent_version="unknown", stale=False),
+    ]
+
+    title, body, status, badge = diagnostics._agent_summary(nodeviews)
+
+    assert title == "Agents reporting?"
+    assert body == "1 current, 1 behind, 1 unknown"
+    assert status == "warn"
+    assert badge == "Needs attention"
 
 
 def test_api_services_returns_service_rows(monkeypatch, tmp_path):

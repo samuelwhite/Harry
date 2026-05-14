@@ -159,21 +159,28 @@ def _summary_status(label: str, body: str, status: str, badge: str | None = None
 def _agent_summary(nodeviews) -> tuple[str, str, str, str | None]:
     total = len(nodeviews)
     stale_n = sum(1 for n in nodeviews if n.stale)
-    behind = sum(
+    current_n = sum(
+        1
+        for n in nodeviews
+        if display_agent_version(n.agent_version) not in ("", "unknown") and display_agent_version(n.agent_version) == AGENT_VERSION
+    )
+    behind_n = sum(
         1
         for n in nodeviews
         if display_agent_version(n.agent_version) not in ("", "unknown") and display_agent_version(n.agent_version) != AGENT_VERSION
     )
-    healthy_n = max(0, total - stale_n - behind)
+    unknown_n = max(0, total - current_n - behind_n)
 
     if total == 0:
         return _summary_status("Agents reporting?", "No agents reporting yet.", "info", "Not set up yet")
-    if stale_n or behind:
-        body = f"{healthy_n} healthy, {stale_n} stale, {behind} behind"
+    if stale_n or behind_n or unknown_n:
+        body = f"{current_n} current, {behind_n} behind, {unknown_n} unknown"
+        if stale_n:
+            body += f", {stale_n} stale"
         return _summary_status("Agents reporting?", body, "warn", "Needs attention")
-    if healthy_n == 1:
-        return _summary_status("Agents reporting?", "1 healthy agent reporting.", "ok", "Healthy")
-    return _summary_status("Agents reporting?", f"{healthy_n} healthy agents reporting.", "ok", "Healthy")
+    if current_n == 1:
+        return _summary_status("Agents reporting?", "1 current agent reporting.", "ok", "Healthy")
+    return _summary_status("Agents reporting?", f"{current_n} current agents reporting.", "ok", "Healthy")
 
 
 def _service_summary() -> tuple[str, str, str, str | None] | None:
@@ -258,6 +265,12 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
         for n in nodeviews
         if display_agent_version(n.agent_version) not in ("", "unknown") and display_agent_version(n.agent_version) != AGENT_VERSION
     )
+    current_n = sum(
+        1
+        for n in nodeviews
+        if display_agent_version(n.agent_version) not in ("", "unknown") and display_agent_version(n.agent_version) == AGENT_VERSION
+    )
+    unknown_n = max(0, len(nodeviews) - current_n - behind)
 
     delayed = sum(
         1
@@ -396,12 +409,14 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
         <tr><td>Total nodes</td><td>{len(nodeviews)}</td></tr>
         <tr><td>Healthy nodes</td><td>{healthy_n}</td></tr>
         <tr><td>Stale nodes</td><td>{stale_n}</td></tr>
+        <tr><td>Current agents</td><td>{current_n}</td></tr>
+        <tr><td>Behind agents</td><td>{behind}</td></tr>
+        <tr><td>Unknown agents</td><td>{unknown_n}</td></tr>
         <tr><td>Bad findings</td><td>{bad_n}</td></tr>
         <tr><td>Warn findings</td><td>{warn_n}</td></tr>
         <tr><td>Info findings</td><td>{info_n}</td></tr>
         <tr><td>Delayed reporters</td><td>{delayed}</td></tr>
         <tr><td>Total advice items</td><td>{advice_total}</td></tr>
-        <tr><td>Agent version mismatch</td><td>{behind}</td></tr>
         <tr><td>Expected agent version</td><td>{AGENT_VERSION}</td></tr>
       </tbody>
     </table>
