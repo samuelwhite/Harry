@@ -5,6 +5,7 @@ AGENT_DIR="${HARRY_AGENT_DIR:-/opt/harry/agent}"
 AGENT_PATH="${AGENT_DIR}/harry_agent.sh"
 TMP_AGENT="$(mktemp /tmp/harry_agent_install.XXXXXX.sh)"
 ALLOW_REPOINT="${HARRY_ALLOW_REPOINT:-0}"
+INSTALL_ROOT="${HARRY_INSTALL_DIR:-}"
 HARRY_BASE_URL="${HARRY_BASE_URL:-}"
 HARRY_PUBLIC_BASE_URL="${HARRY_PUBLIC_BASE_URL:-}"
 HARRY_INGEST_URL="${HARRY_INGEST_URL:-}"
@@ -62,7 +63,9 @@ ensure_required_runtime() {
   local missing=()
 
   need_cmd curl || missing+=(curl)
-  need_cmd python3 || missing+=(python3)
+  if ! need_cmd python3 && ! need_cmd python; then
+    missing+=(python3)
+  fi
 
   if [ "${#missing[@]}" -gt 0 ]; then
     echo "==> Installing required runtime packages..."
@@ -70,7 +73,10 @@ ensure_required_runtime() {
   fi
 
   need_cmd curl || { echo "ERROR: curl is still missing after install attempt." >&2; exit 1; }
-  need_cmd python3 || { echo "ERROR: python3 is still missing after install attempt." >&2; exit 1; }
+  if ! need_cmd python3 && ! need_cmd python; then
+    echo "ERROR: python3/python is still missing after install attempt." >&2
+    exit 1
+  fi
 }
 
 install_optional_enrichers() {
@@ -96,20 +102,94 @@ install_optional_enrichers() {
   fi
 }
 
+detect_platform() {
+  if [ -f /etc.defaults/VERSION ] && [ -f /etc/synoinfo.conf ]; then
+    echo "synology-dsm"
+    return 0
+  fi
+
+  if need_cmd systemctl && [ -d /run/systemd/system ]; then
+    echo "linux-systemd"
+    return 0
+  fi
+
+  echo "linux-generic"
+}
+
+resolve_synology_install_root() {
+  if [ -n "${INSTALL_ROOT:-}" ]; then
+    case "$INSTALL_ROOT" in
+      ""|"/"|".")
+        echo ""
+        return 1
+        ;;
+    esac
+    echo "$INSTALL_ROOT"
+    return 0
+  fi
+
+  local install_user="${HARRY_INSTALL_USER:-${SUDO_USER:-}}"
+  local home_candidate=""
+  local volume_candidate=""
+  local volume
+
+  if [ -n "$install_user" ] && [ -d "/var/services/homes" ]; then
+    home_candidate="/var/services/homes/${install_user}/harry"
+    echo "$home_candidate"
+    return 0
+  fi
+
+  for volume in /volume*; do
+    if [ -d "$volume" ]; then
+      volume_candidate="${volume%/}/@harry"
+      echo "$volume_candidate"
+      return 0
+    fi
+  done
+
+  if [ -n "$install_user" ]; then
+    home_candidate="/var/services/homes/${install_user}/harry"
+    echo "$home_candidate"
+    return 0
+  fi
+
+  echo ""
+  return 1
+}
+
 current_configured_base_url() {
+  local platform="${1:-}"
+  local install_root="${2:-}"
   local service_file="/etc/systemd/system/harry-agent.service"
-  if [ -f "$service_file" ]; then
-    awk -F= '/Environment="HARRY_PUBLIC_BASE_URL=/{print $2}' "$service_file" \
-      | sed 's/"$//' \
-      | head -n1
-    return 0
+  local env_file="${install_root%/}/harry-agent.env"
+  local value=""
+
+  if [ "$platform" = "linux-systemd" ] && [ -f "$service_file" ]; then
+    value="$(
+      awk -F= '
+        /Environment="HARRY_PUBLIC_BASE_URL=/ {print $2; exit}
+        /Environment="HARRY_BASE_URL=/ {print $2; exit}
+      ' "$service_file" | sed 's/"$//'
+    )"
+    if [ -n "$value" ]; then
+      echo "$value"
+      return 0
+    fi
   fi
-  if [ -f "$service_file" ]; then
-    awk -F= '/Environment="HARRY_BASE_URL=/{print $2}' "$service_file" \
-      | sed 's/"$//' \
-      | head -n1
-    return 0
+
+  if [ "$platform" = "synology-dsm" ] && [ -f "$env_file" ]; then
+    value="$(
+      awk -F= '
+        /^HARRY_PUBLIC_BASE_URL=/ {print $2; exit}
+        /^HARRY_BASE_URL=/ {print $2; exit}
+      ' "$env_file" | sed 's/"$//'
+    )"
+    if [ -n "$value" ]; then
+      echo "$value"
+      return 0
+    fi
   fi
+
   echo ""
 }
 
@@ -118,8 +198,34 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-if ! need_cmd systemctl; then
-  echo "ERROR: systemctl not found. Harry agent installer currently requires systemd." >&2
+PLATFORM="$(detect_platform)"
+
+if [ "$PLATFORM" = "synology-dsm" ]; then
+  if ! need_cmd python3 && ! need_cmd python; then
+    echo "ERROR: python3 (or python) is required for the Harry Agent runtime." >&2
+    exit 1
+  fi
+  if ! need_cmd curl; then
+    echo "ERROR: curl is required for the Harry Agent runtime." >&2
+    exit 1
+  fi
+  INSTALL_ROOT="$(resolve_synology_install_root)"
+  if [ -z "$INSTALL_ROOT" ]; then
+    echo "ERROR: Could not determine a persistent install directory for Synology DSM." >&2
+    echo "Set HARRY_INSTALL_DIR to a writable persistent path and rerun." >&2
+    exit 1
+  fi
+  AGENT_DIR="${INSTALL_ROOT%/}/agent"
+  AGENT_PATH="${AGENT_DIR}/harry_agent.sh"
+else
+  if ! need_cmd systemctl; then
+    echo "ERROR: systemctl not found. Harry agent installer currently requires systemd outside Synology DSM." >&2
+    exit 1
+  fi
+fi
+
+if ! need_cmd bash; then
+  echo "ERROR: bash not found. Harry Agent requires bash to run." >&2
   exit 1
 fi
 
@@ -289,7 +395,7 @@ resolve_brain_url() {
   prompt_manual_brain_url
 }
 
-EXISTING_BASE_URL="$(current_configured_base_url || true)"
+EXISTING_BASE_URL="$(current_configured_base_url "$PLATFORM" "$INSTALL_ROOT" || true)"
 if [ -n "${HARRY_BASE_URL:-}" ] && [ -n "${EXISTING_BASE_URL:-}" ] && [ "${EXISTING_BASE_URL%/}" != "${HARRY_BASE_URL%/}" ]; then
   if [ "$ALLOW_REPOINT" != "1" ]; then
     echo "ERROR: Existing Harry agent is already configured for a different Brain." >&2
@@ -307,6 +413,21 @@ fi
 
 if ! resolve_brain_url; then
   exit 1
+fi
+
+if [ -n "${EXISTING_BASE_URL:-}" ] && [ -n "${HARRY_BASE_URL:-}" ] && [ "${EXISTING_BASE_URL%/}" != "${HARRY_BASE_URL%/}" ]; then
+  if [ "$ALLOW_REPOINT" != "1" ]; then
+    echo "ERROR: Existing Harry agent is already configured for a different Brain." >&2
+    echo "Existing: ${EXISTING_BASE_URL}" >&2
+    echo "Requested: ${HARRY_BASE_URL}" >&2
+    echo "Refusing to silently repoint this node." >&2
+    echo "To override intentionally, rerun with:" >&2
+    echo "  HARRY_ALLOW_REPOINT=1" >&2
+    exit 1
+  fi
+  echo "WARNING: Repoint override accepted." >&2
+  echo "         Existing: ${EXISTING_BASE_URL}" >&2
+  echo "         New:      ${HARRY_BASE_URL}" >&2
 fi
 
 mkdir -p "$AGENT_DIR"
@@ -361,9 +482,77 @@ install -d "$AGENT_DIR"
 install -m 0755 "$TMP_AGENT" "$AGENT_PATH"
 rm -f "$TMP_AGENT" >/dev/null 2>&1 || true
 
-echo "==> Installing systemd unit files"
+RUNNER_PATH="${INSTALL_ROOT%/}/run-harry-agent.sh"
+CONFIG_PATH="${INSTALL_ROOT%/}/harry-agent.env"
 
-cat > /etc/systemd/system/harry-agent.service <<EOF_UNIT
+write_synology_bundle() {
+  install -d -m 0755 "$INSTALL_ROOT" "$AGENT_DIR" "${INSTALL_ROOT%/}/logs" "${INSTALL_ROOT%/}/status" "${INSTALL_ROOT%/}/cache"
+
+  cat > "$CONFIG_PATH" <<EOF_CONFIG
+HARRY_SELF_UPDATE=1
+HARRY_AGENT_DIR=${AGENT_DIR}
+HARRY_STATUS_DIR=${INSTALL_ROOT%/}/status
+HARRY_STATUS_FILE=${INSTALL_ROOT%/}/status/status.json
+HARRY_LOG_FILE=${INSTALL_ROOT%/}/logs/harry-agent.log
+HARRY_BRAIN_URL_CACHE_FILE=${INSTALL_ROOT%/}/cache/brain_url.txt
+EOF_CONFIG
+
+  if [ -n "${HARRY_BASE_URL:-}" ]; then
+    cat >> "$CONFIG_PATH" <<EOF_CONFIG
+HARRY_PUBLIC_BASE_URL=${HARRY_BASE_URL}
+HARRY_BASE_URL=${HARRY_BASE_URL}
+HARRY_INGEST_URL=${HARRY_BASE_URL}/ingest
+EOF_CONFIG
+  fi
+
+  cat > "$RUNNER_PATH" <<'EOF_RUNNER'
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CONFIG_FILE="${SCRIPT_DIR}/harry-agent.env"
+
+if [ -f "$CONFIG_FILE" ]; then
+  . "$CONFIG_FILE"
+fi
+
+export PATH="/usr/local/bin:/usr/bin:/bin:/usr/syno/bin:/usr/syno/sbin"
+exec "${SCRIPT_DIR}/agent/harry_agent.sh" "$@"
+EOF_RUNNER
+
+  chmod 0755 "$RUNNER_PATH" "$AGENT_PATH" >/dev/null 2>&1 || true
+}
+
+print_synology_instructions() {
+  local run_cmd="${RUNNER_PATH}"
+
+  echo
+  echo "✅ Harry Agent installed for Synology DSM."
+  echo "Agent:  ${AGENT_PATH}"
+  echo "Config: ${CONFIG_PATH}"
+  echo "Wrapper: ${RUNNER_PATH}"
+  echo
+  echo "DSM Task Scheduler:"
+  echo "Control Panel > Task Scheduler > Create > Scheduled Task > User-defined script"
+  echo "Run the task as the same user who owns the install directory."
+  echo "Paste this script:"
+  echo 'export PATH=/usr/local/bin:/usr/bin:/bin:/usr/syno/bin:/usr/syno/sbin'
+  printf 'exec "%s"\n' "$run_cmd"
+  echo
+  echo "One-shot test:"
+  printf '"%s"\n' "$run_cmd"
+}
+
+install_synology_mode() {
+  echo "==> Installing Synology DSM-friendly agent bundle"
+  write_synology_bundle
+  print_synology_instructions
+}
+
+install_systemd_mode() {
+  echo "==> Installing systemd unit files"
+
+  cat > /etc/systemd/system/harry-agent.service <<EOF_UNIT
 [Unit]
 Description=Harry Agent snapshot sender
 Wants=network-online.target
@@ -378,15 +567,15 @@ ExecStart=${AGENT_PATH}
 SuccessExitStatus=0
 EOF_UNIT
 
-if [ -n "${HARRY_BASE_URL:-}" ]; then
-  cat >> /etc/systemd/system/harry-agent.service <<EOF_UNIT
+  if [ -n "${HARRY_BASE_URL:-}" ]; then
+    cat >> /etc/systemd/system/harry-agent.service <<EOF_UNIT
 Environment="HARRY_PUBLIC_BASE_URL=${HARRY_BASE_URL}"
 Environment="HARRY_BASE_URL=${HARRY_BASE_URL}"
 Environment="HARRY_INGEST_URL=${HARRY_BASE_URL}/ingest"
 EOF_UNIT
-fi
+  fi
 
-cat > /etc/systemd/system/harry-agent.timer <<'EOF_TIMER'
+  cat > /etc/systemd/system/harry-agent.timer <<'EOF_TIMER'
 [Unit]
 Description=Run Harry Agent every 5 minutes
 
@@ -400,34 +589,41 @@ Persistent=true
 WantedBy=timers.target
 EOF_TIMER
 
-echo "==> Reloading systemd"
-systemctl daemon-reload
+  echo "==> Reloading systemd"
+  systemctl daemon-reload
 
-echo "==> Enabling and starting harry-agent.timer"
-systemctl enable --now harry-agent.timer
+  echo "==> Enabling and starting harry-agent.timer"
+  systemctl enable --now harry-agent.timer
 
-echo "==> Triggering immediate first agent run"
-if systemctl start harry-agent.service; then
-  echo "==> First agent run triggered."
+  echo "==> Triggering immediate first agent run"
+  if systemctl start harry-agent.service; then
+    echo "==> First agent run triggered."
+  else
+    echo "WARNING: harry-agent.service failed to start cleanly." >&2
+  fi
+
+  TIMER_ENABLED="$(systemctl is-enabled harry-agent.timer 2>/dev/null || true)"
+  TIMER_ACTIVE="$(systemctl is-active harry-agent.timer 2>/dev/null || true)"
+  SERVICE_ACTIVE="$(systemctl is-active harry-agent.service 2>/dev/null || true)"
+
+  echo
+  echo "✅ Harry Agent installed."
+  echo "Agent:  ${AGENT_PATH}"
+  echo "Timer enabled: ${TIMER_ENABLED:-unknown}"
+  echo "Timer active:  ${TIMER_ACTIVE:-unknown}"
+  if [[ "${SERVICE_ACTIVE}" == "inactive" ]]; then
+    echo "Service state: inactive (normal for oneshot service)"
+  else
+    echo "Service state: ${SERVICE_ACTIVE:-unknown}"
+  fi
+  echo "Bootstrapping: waiting for first check-in..."
+  echo "Timer:  systemctl status harry-agent.timer --no-pager"
+  echo "Run now: systemctl start harry-agent.service"
+  echo "Logs:   journalctl -u harry-agent.service --since '15 min ago' --no-pager"
+}
+
+if [ "$PLATFORM" = "synology-dsm" ]; then
+  install_synology_mode
 else
-  echo "WARNING: harry-agent.service failed to start cleanly." >&2
+  install_systemd_mode
 fi
-
-TIMER_ENABLED="$(systemctl is-enabled harry-agent.timer 2>/dev/null || true)"
-TIMER_ACTIVE="$(systemctl is-active harry-agent.timer 2>/dev/null || true)"
-SERVICE_ACTIVE="$(systemctl is-active harry-agent.service 2>/dev/null || true)"
-
-echo
-echo "✅ Harry Agent installed."
-echo "Agent:  ${AGENT_PATH}"
-echo "Timer enabled: ${TIMER_ENABLED:-unknown}"
-echo "Timer active:  ${TIMER_ACTIVE:-unknown}"
-if [[ "${SERVICE_ACTIVE}" == "inactive" ]]; then
-  echo "Service state: inactive (normal for oneshot service)"
-else
-  echo "Service state: ${SERVICE_ACTIVE:-unknown}"
-fi
-echo "Bootstrapping: waiting for first check-in..."
-echo "Timer:  systemctl status harry-agent.timer --no-pager"
-echo "Run now: systemctl start harry-agent.service"
-echo "Logs:   journalctl -u harry-agent.service --since '15 min ago' --no-pager"

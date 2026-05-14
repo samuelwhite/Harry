@@ -34,6 +34,22 @@ log_fail() {
   printf '[%s] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$msg" >> "$LOG_FILE" 2>/dev/null || true
 }
 
+detect_platform() {
+  if [ -f /etc.defaults/VERSION ] && [ -f /etc/synoinfo.conf ]; then
+    echo "synology-dsm"
+    return 0
+  fi
+
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    echo "linux-systemd"
+    return 0
+  fi
+
+  echo "linux-generic"
+}
+
+export HARRY_PLATFORM="${HARRY_PLATFORM:-$(detect_platform)}"
+
 # -----------------------------------------------------------------------------
 # Local runtime status
 # -----------------------------------------------------------------------------
@@ -576,6 +592,50 @@ def parse_capacity_to_gb(s: str):
     if u == "TB": return n * 1024
     return None
 
+def read_kv_file(path: str):
+    data = {}
+    try:
+        for line in read(path).splitlines():
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            data[key.strip()] = value.strip().strip('"')
+    except Exception:
+        pass
+    return data
+
+def detect_platform():
+    if os.path.exists("/etc.defaults/VERSION") and os.path.exists("/etc/synoinfo.conf"):
+        return "synology-dsm"
+    if os.path.exists("/run/systemd/system") or which("systemctl"):
+        return "linux-systemd"
+    return "linux-generic"
+
+def read_uptime_seconds():
+    txt = read("/proc/uptime").strip()
+    if not txt:
+        return None
+    try:
+        return float((txt.split() or [""])[0])
+    except Exception:
+        return None
+
+def read_cpuinfo_model():
+    txt = read("/proc/cpuinfo")
+    if not txt:
+        return None
+    for line in txt.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        if key.strip().lower() == "model name" and value.strip():
+            return value.strip()
+    return None
+
+platform = (os.environ.get("HARRY_PLATFORM") or "").strip() or detect_platform()
+synology_info = read_kv_file("/etc.defaults/VERSION") if platform == "synology-dsm" else {}
+os_release = read_kv_file("/etc/os-release")
+
 def read_agent_status():
     try:
         with open(STATUS_FILE, "r", encoding="utf-8") as fh:
@@ -675,6 +735,34 @@ if which("lscpu"):
             cpu = v
         if k == "cpu(s)" and v:
             cpu_cores = to_int(v)
+if cpu is None:
+    cpu = read_cpuinfo_model()
+if cpu_cores is None:
+    try:
+        cpu_cores = os.cpu_count() or None
+    except Exception:
+        cpu_cores = None
+
+architecture = run(["uname", "-m"]) or None
+uptime_seconds = read_uptime_seconds()
+
+dsm_version = None
+if platform == "synology-dsm" and synology_info:
+    major = (synology_info.get("majorversion") or "").strip()
+    minor = (synology_info.get("minorversion") or "").strip()
+    build = (synology_info.get("buildnumber") or "").strip()
+    smallfix = (synology_info.get("smallfixnumber") or "").strip()
+    if major and minor:
+        dsm_version = f"{major}.{minor}"
+    elif major:
+        dsm_version = major
+    if build:
+        dsm_version = f"{dsm_version}-build{build}" if dsm_version else f"build{build}"
+    if smallfix and smallfix != "0":
+        dsm_version = f"{dsm_version}-sp{smallfix}" if dsm_version else f"sp{smallfix}"
+
+os_pretty_name = os_release.get("PRETTY_NAME") or os_release.get("NAME") or None
+os_id = os_release.get("ID") or None
 
 meminfo = read("/proc/meminfo")
 mem_used_pct = None
@@ -689,6 +777,8 @@ try:
     if total_kb > 0:
         used = total_kb - avail_kb
         mem_used_pct = (used / total_kb) * 100.0
+        if ram_total_gb is None:
+            ram_total_gb = int(round(total_kb / 1024 / 1024))
 except Exception:
     pass
 
@@ -860,10 +950,12 @@ if which("sensors"):
 
 facts_gpus = []
 gpus = []
+# TODO: DSM-specific disk health and SMART integration stay out of scope for this pass.
 capabilities = {
     "gpu": bool(which("nvidia-smi") or which("lspci")),
     "docker": which("docker") is not None,
     "systemd": bool(which("systemctl") or os.path.exists("/run/systemd/system")),
+    "synology_dsm": platform == "synology-dsm",
     "temperature": which("sensors") is not None,
     "smart": which("smartctl") is not None,
 }
@@ -938,6 +1030,32 @@ agent_status.setdefault("error_code", None)
 agent_status.setdefault("error_summary", None)
 agent_status.setdefault("consecutive_failures", 0)
 
+facts_extensions = {
+    "platform": platform,
+}
+if architecture:
+    facts_extensions["architecture"] = architecture
+if os_pretty_name:
+    facts_extensions["os_pretty_name"] = os_pretty_name
+if os_id:
+    facts_extensions["os_id"] = os_id
+if uptime_seconds is not None:
+    facts_extensions["uptime_seconds"] = uptime_seconds
+if platform == "synology-dsm":
+    synology_extension = {}
+    if dsm_version:
+        synology_extension["dsm_version"] = dsm_version
+    for key in ("majorversion", "minorversion", "buildnumber", "smallfixnumber", "buildphase"):
+        value = synology_info.get(key)
+        if value:
+            synology_extension[key] = value
+    if synology_extension:
+        facts_extensions["synology"] = synology_extension
+
+metrics_extensions = {
+    "disk_physical": disk_physical,
+}
+
 payload = {
   "schema_version": SCHEMA_VERSION,
   "agent_version": AGENT_VERSION,
@@ -945,32 +1063,30 @@ payload = {
   "ts": ts,
   "agent_status": agent_status,
   "capabilities": capabilities,
-  "facts": {
-    "hostname": hostname,
-    "model": model,
-    "cpu": cpu,
-    "cpu_cores": cpu_cores,
+    "facts": {
+      "hostname": hostname,
+      "model": model,
+      "cpu": cpu,
+      "cpu_cores": cpu_cores,
     "ram_total_gb": ram_total_gb,
     "ram_max_gb": ram_max_gb,
     "ram_slots_total": ram_slots_total,
     "ram_slots_used": ram_slots_used,
     "ram_type": ram_type,
-    "bios_release_date": bios_release_date,
-    "bios_version": bios_version,
-    "disks": facts_disks,
-    "gpus": facts_gpus,
-    "extensions": {}
-  },
-  "metrics": {
-    "cpu_load_1m": load1,
-    "mem_used_pct": mem_used_pct,
-    "disk_used": disk_used,
-    "temps_c": temps,
-    "gpu": gpus,
-    "extensions": {
-      "disk_physical": disk_physical
-    }
-  },
+      "bios_release_date": bios_release_date,
+      "bios_version": bios_version,
+      "disks": facts_disks,
+      "gpus": facts_gpus,
+      "extensions": facts_extensions
+    },
+    "metrics": {
+      "cpu_load_1m": load1,
+      "mem_used_pct": mem_used_pct,
+      "disk_used": disk_used,
+      "temps_c": temps,
+      "gpu": gpus,
+      "extensions": metrics_extensions
+    },
   "derived": {
     "health": {"state":"unknown","worst_severity":"unknown","reasons":[]},
     "extensions": {}
