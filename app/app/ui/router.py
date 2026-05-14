@@ -564,7 +564,7 @@ def _downloads_synology_help_html() -> str:
     <div class="subtitle" style="margin-top:8px;">2. From SSH, run the Linux installer from this Brain.</div>
     <div class="subtitle" style="margin-top:10px;"><code>sudo HARRY_PLATFORM="synology-dsm" curl -fsSL http://&lt;brain-ip&gt;:8789/downloads/linux-agent | bash</code></div>
     <div class="subtitle" style="margin-top:8px;">3. If prompted, use automatic discovery or paste the Brain address shown above.</div>
-    <div class="subtitle" style="margin-top:8px;">4. If you want a recurring DSM task, create Control Panel &gt; Task Scheduler &gt; Create &gt; Scheduled Task &gt; User-defined script and paste the command printed by the installer.</div>
+    <div class="subtitle" style="margin-top:8px;">4. If you want a recurring DSM task, create Control Panel &gt; Task Scheduler &gt; Create &gt; Scheduled Task &gt; User-defined script, run it as the install owner (usually root when installed with sudo), and paste the command printed by the installer. Synology self-update is disabled by default for safety.</div>
     <div class="subtitle" style="margin-top:8px;">Manual check: <code>./run-harry-agent.sh</code></div>
     <div class="subtitle" style="margin-top:8px;">If it works manually but not on schedule, check full paths, <code>PATH</code>, and the Task Scheduler logs.</div>
   </div>

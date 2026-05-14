@@ -67,6 +67,8 @@ def test_install_agent_supports_synology_dsm_mode():
     assert "run-harry-agent.sh" in script
     assert "HARRY_STATUS_DIR" in script
     assert "HARRY_BRAIN_URL_CACHE_FILE" in script
+    assert "HARRY_BACKOFF_ENABLE=0" in script
+    assert "HARRY_SELF_UPDATE=0" in script
     assert "Task Scheduler" in script
     assert "/usr/syno/bin:/usr/syno/sbin" in script
     assert "set -a" in script
@@ -219,6 +221,30 @@ def test_install_agent_reports_debug_details_for_invalid_url(tmp_path):
     assert result.returncode != 0
     assert f"DEBUG: sanitized URL: http://{ip_host}:8789/api" in result.stderr
     assert "DEBUG: validation rule failed: path segments are not allowed" in result.stderr
+
+
+def test_linux_agent_resource_backoff_writes_status_and_log(tmp_path):
+    script = Path("agent/harry_agent.sh").read_text(encoding="utf-8")
+    snippet = _write_shell_snippet(tmp_path, script, ["resource_backoff_skip"])
+
+    log_file = tmp_path / "harry-agent.log"
+    status_file = tmp_path / "status.json"
+    cmd = (
+        f'export LOG_FILE="{log_file.as_posix()}"; '
+        f'export STATUS_FILE="{status_file.as_posix()}"; '
+        'export HARRY_NODE="nas-1"; '
+        'log_fail(){ printf "%s\\n" "$1" >> "$LOG_FILE"; }; '
+        'status_mark_failure(){ printf "%s|%s\\n" "$1" "$2" >> "$STATUS_FILE"; }; '
+        f'source "{snippet.as_posix()}"; '
+        'resource_backoff_skip "memory_pressure" "mem_used=100.00 threshold=92"'
+    )
+
+    result = subprocess.run([_bash_exe(), "-lc", cmd], capture_output=True, text=True, check=True)
+
+    assert "Resource backoff triggered; telemetry skipped." in result.stderr
+    assert "reason=memory_pressure mem_used=100.00 threshold=92 telemetry_skipped" in result.stderr
+    assert "resource_backoff node=nas-1 reason=memory_pressure mem_used=100.00 threshold=92 telemetry_skipped" in log_file.read_text(encoding="utf-8")
+    assert 'resource_backoff|reason=memory_pressure mem_used=100.00 threshold=92 telemetry_skipped' in status_file.read_text(encoding="utf-8")
 
 
 def test_update_harry_script_describes_safe_update_flow():

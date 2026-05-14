@@ -163,7 +163,7 @@ Enable SSH on the NAS, then run the Linux installer command from a shell:
 
 `sudo HARRY_PLATFORM="synology-dsm" curl -fsSL "http://<brain-ip>:8789/downloads/linux-agent" | bash`
 
-If DSM scheduling is needed, create a Control Panel > Task Scheduler > Create > Scheduled Task > User-defined script task and paste the command printed by the installer.
+If DSM scheduling is needed, create a Control Panel > Task Scheduler > Create > Scheduled Task > User-defined script task, run it as the install owner (usually root when installed with sudo), and paste the command printed by the installer. Synology self-update is disabled by default for safety.
 
 ---
 

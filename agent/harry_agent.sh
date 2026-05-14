@@ -472,6 +472,22 @@ BACKOFF_ENABLE="${HARRY_BACKOFF_ENABLE:-1}"
 MAX_LOAD_PER_CORE="${HARRY_MAX_LOAD_PER_CORE:-1.5}"
 MAX_MEM_USED_PCT="${HARRY_MAX_MEM_USED_PCT:-92}"
 
+resource_backoff_skip() {
+  local reason="${1:-resource_backoff}"
+  local details="${2:-}"
+  local summary="reason=${reason}"
+
+  if [ -n "$details" ]; then
+    summary="${summary} ${details}"
+  fi
+
+  summary="${summary} telemetry_skipped"
+  log_fail "resource_backoff node=${HARRY_NODE} ${summary}"
+  status_mark_failure "resource_backoff" "${summary}"
+  echo "Resource backoff triggered; telemetry skipped." >&2
+  echo "  ${summary}" >&2
+}
+
 if [ "$BACKOFF_ENABLE" = "1" ]; then
   CORES="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1)"
   CORES="${CORES:-1}"
@@ -506,7 +522,8 @@ except Exception:
 PY
     )"
     if [ "$TOO_BUSY" = "1" ]; then
-      exit 0
+      RESOURCE_BACKOFF_REASON="${RESOURCE_BACKOFF_REASON:+${RESOURCE_BACKOFF_REASON},}load_pressure"
+      RESOURCE_BACKOFF_DETAILS="${RESOURCE_BACKOFF_DETAILS:+${RESOURCE_BACKOFF_DETAILS} }load_1m=${LOAD1} threshold=${MAX_LOAD_PER_CORE}x${CORES}"
     fi
   fi
 
@@ -524,8 +541,14 @@ except Exception:
 PY
     )"
     if [ "$TOO_FULL" = "1" ]; then
-      exit 0
+      RESOURCE_BACKOFF_REASON="${RESOURCE_BACKOFF_REASON:+${RESOURCE_BACKOFF_REASON},}memory_pressure"
+      RESOURCE_BACKOFF_DETAILS="${RESOURCE_BACKOFF_DETAILS:+${RESOURCE_BACKOFF_DETAILS} }mem_used=${MEM_USED} threshold=${MAX_MEM_USED_PCT}"
     fi
+  fi
+
+  if [ -n "${RESOURCE_BACKOFF_REASON:-}" ]; then
+    resource_backoff_skip "${RESOURCE_BACKOFF_REASON}" "${RESOURCE_BACKOFF_DETAILS:-}"
+    exit 0
   fi
 fi
 

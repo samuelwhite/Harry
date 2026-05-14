@@ -628,7 +628,8 @@ write_synology_bundle() {
   install -d -m 0755 "$INSTALL_ROOT" "$AGENT_DIR" "${INSTALL_ROOT%/}/logs" "${INSTALL_ROOT%/}/status" "${INSTALL_ROOT%/}/cache"
 
   cat > "$CONFIG_PATH" <<EOF_CONFIG
-HARRY_SELF_UPDATE=1
+HARRY_BACKOFF_ENABLE=0
+HARRY_SELF_UPDATE=0
 HARRY_AGENT_DIR=${AGENT_DIR}
 HARRY_STATUS_DIR=${INSTALL_ROOT%/}/status
 HARRY_STATUS_FILE=${INSTALL_ROOT%/}/status/status.json
@@ -675,7 +676,8 @@ print_synology_instructions() {
   echo
   echo "DSM Task Scheduler:"
   echo "Control Panel > Task Scheduler > Create > Scheduled Task > User-defined script"
-  echo "Run the task as the same user who owns the install directory."
+  echo "Run the task as the install owner, usually root when installed with sudo."
+  echo "Synology self-update is disabled by default for safety."
   echo "Paste this script:"
   echo 'export PATH=/usr/local/bin:/usr/bin:/bin:/usr/syno/bin:/usr/syno/sbin'
   printf 'exec "%s"\n' "$run_cmd"

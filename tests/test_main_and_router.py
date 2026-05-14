@@ -385,6 +385,9 @@ def test_downloads_includes_synology_guidance(monkeypatch, tmp_path):
     assert 'sudo HARRY_PLATFORM="synology-dsm" curl -fsSL http://&lt;brain-ip&gt;:8789/downloads/linux-agent | bash' in html
     assert "./run-harry-agent.sh" in html
     assert "PATH" in html
+    assert "install owner" in html
+    assert "usually root when installed with sudo" in html
+    assert "self-update is disabled by default" in html
 
 
 def test_downloads_linux_agent_prefers_live_installer_source(monkeypatch, tmp_path):
