@@ -55,6 +55,46 @@ def test_normalise_for_schema_promotes_legacy_metrics_shape():
     assert normalised["metrics"]["extensions"]["mounts_raw"][0]["mount"] == "/"
 
 
+def test_normalise_for_schema_preserves_synology_storage_byte_fields():
+    payload = {
+        "schema_version": "0.2.1",
+        "node": "nas-1",
+        "ts": "2026-05-07T12:00:00Z",
+        "facts": {},
+        "metrics": {
+            "disk_used": [
+                {
+                    "mount": "/volume1",
+                    "fs": "/dev/vg1/volume_1",
+                    "device": "/dev/vg1/volume_1",
+                    "total_b": 1000000,
+                    "used_b": 400000,
+                    "free_b": 600000,
+                    "used_pct": 40.0,
+                    "pct": 40.0,
+                    "size_gb": 0.93,
+                }
+            ],
+            "temps_c": {},
+            "gpu": [],
+            "extensions": {},
+        },
+        "derived": {},
+        "advice": [],
+    }
+
+    normalised = normalise_for_schema(payload, contract_version="0.2.3")
+    volume = normalised["metrics"]["disk_used"][0]
+
+    assert volume["mount"] == "/volume1"
+    assert volume["fs"] == "/dev/vg1/volume_1"
+    assert volume["device"] == "/dev/vg1/volume_1"
+    assert volume["total_b"] == 1000000
+    assert volume["used_b"] == 400000
+    assert volume["free_b"] == 600000
+    assert volume["used_pct"] == 40.0
+
+
 def test_normalise_for_schema_strips_platform_suffix_from_agent_version():
     payload = {
         "schema_version": "0.2.3",

@@ -656,7 +656,7 @@ export HARRY_STATUS_FILE="$STATUS_FILE"
 
 set +e
 "$PYTHON" - <<'PY' >"$TMP_PAYLOAD" 2>"$TMP_ERR"
-import json, os, re, subprocess, shutil, socket, math
+import json, os, re, subprocess, shutil, socket, math, sys
 from datetime import datetime, timezone
 
 AGENT_VERSION = os.environ.get("HARRY_AGENT_VERSION") or "unknown"
@@ -753,6 +753,81 @@ def read_cpuinfo_model():
         if key.strip().lower() == "model name" and value.strip():
             return value.strip()
     return None
+
+storage_debug_entries = []
+
+def storage_skip_debug(reason: str, fs=None, mount=None):
+    parts = ["storage_skip", f"reason={reason}"]
+    if fs:
+        parts.append(f"fs={fs}")
+    if mount:
+        parts.append(f"mount={mount}")
+    msg = " ".join(parts)
+    storage_debug_entries.append(msg)
+    print(f"DEBUG: {msg}", file=sys.stderr)
+
+def storage_skip_reason(fs_l: str, mount_l: str):
+    if fs_l in ("udev", "tmpfs", "devtmpfs", "overlay", "squashfs", "efivarfs", "proc", "sysfs", "securityfs", "cgroup", "cgroup2", "pstore", "tracefs", "debugfs", "mqueue", "hugetlbfs", "fusectl", "ramfs", "autofs"):
+        return "pseudo_filesystem"
+    if fs_l.startswith("/dev/loop"):
+        return "loop_mount"
+    if mount_l.startswith(("/proc", "/sys", "/run", "/dev")):
+        return "system_mount"
+    if "/var/lib/docker" in mount_l or "/var/lib/containerd" in mount_l or "/var/run/docker" in mount_l or "/run/docker" in mount_l:
+        return "docker_runtime_mount"
+    if mount_l.startswith("/snap/"):
+        return "snap_mount"
+    return None
+
+def storage_mount_rows():
+    rows = []
+    if not which("df"):
+        return rows
+
+    df_txt = run(["df", "-B1", "-P"])
+    lines = [l for l in df_txt.splitlines() if l.strip()]
+    for line in lines[1:]:
+        parts = line.split()
+        if len(parts) < 6:
+            storage_skip_debug("unparseable_row", mount=line)
+            continue
+
+        fs = parts[0]
+        total_b = to_int(parts[1])
+        used_b = to_int(parts[2])
+        free_b = to_int(parts[3])
+        mount = parts[5]
+
+        fs_l = (fs or "").lower().strip()
+        mount_l = (mount or "").lower().strip()
+        skip_reason = storage_skip_reason(fs_l, mount_l)
+        if skip_reason:
+            storage_skip_debug(skip_reason, fs, mount)
+            continue
+
+        if total_b is None or used_b is None or free_b is None:
+            storage_skip_debug("missing_capacity_values", fs, mount)
+            continue
+
+        total_b = max(int(total_b), 0)
+        used_b = max(int(used_b), 0)
+        free_b = max(int(free_b), 0)
+        used_pct = (used_b / total_b) * 100.0 if total_b > 0 else None
+        rows.append(
+            {
+                "mount": mount,
+                "fs": fs,
+                "device": fs,
+                "total_b": total_b,
+                "used_b": used_b,
+                "free_b": free_b,
+                "used_pct": used_pct,
+                "pct": used_pct,
+                "size_gb": round(total_b / 1024 / 1024 / 1024, 2) if total_b > 0 else None,
+            }
+        )
+
+    return rows
 
 def env_int(name):
     return to_int(os.environ.get(name))
@@ -1083,43 +1158,7 @@ try:
 except Exception:
     pass
 
-disk_used = []
-if which("df"):
-    df_txt = run(["df", "-B1", "-P"])
-    lines = [l for l in df_txt.splitlines() if l.strip()]
-    for l in lines[1:]:
-        parts = l.split()
-        if len(parts) < 6:
-            continue
-
-        fs = parts[0]
-        total_b = to_float(parts[1])
-        used_b = to_float(parts[2])
-        mount = parts[5]
-
-        fs_l = (fs or "").lower()
-        mount_l = (mount or "").lower()
-
-        if fs_l in ("udev", "tmpfs", "devtmpfs", "overlay", "squashfs", "efivarfs"):
-            continue
-        if mount_l.startswith(("/proc", "/sys", "/run", "/dev")):
-            continue
-        if "/var/lib/docker/" in mount_l:
-            continue
-
-        used_pct = None
-        size_gb = None
-
-        if total_b and total_b > 0 and used_b is not None:
-            used_pct = (used_b / total_b) * 100.0
-            size_gb = total_b / 1024 / 1024 / 1024
-
-        disk_used.append({
-            "fs": fs,
-            "mount": mount,
-            "used_pct": used_pct,
-            "size_gb": round(size_gb, 2) if size_gb is not None else None,
-        })
+disk_used = storage_mount_rows()
 
 disk_physical = []
 if which("lsblk"):
@@ -1310,6 +1349,7 @@ if platform == "synology-dsm":
 
 metrics_extensions = {
     "disk_physical": disk_physical,
+    "storage_debug": storage_debug_entries,
     "memory": {
         "method": memory_method,
         "total_kb": memory_total_kb,

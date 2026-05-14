@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 from app.ui import inventory as inventory_ui
+from app.ui import fleet as fleet_ui
 
 
 def test_inventory_helpers_show_all_disks_gpus_and_network_interfaces():
@@ -125,3 +126,36 @@ def test_inventory_page_renders_network_interfaces_when_present(monkeypatch):
 
     assert "Network interfaces" in html
     assert "Ethernet" in html
+
+
+def test_fleet_storage_panel_renders_synology_volume_mounts():
+    html = fleet_ui._render_storage_physical(
+        [],
+        [
+            {
+                "mount": "/volume1",
+                "fs": "/dev/vg1/volume_1",
+                "device": "/dev/vg1/volume_1",
+                "total_b": 1000000,
+                "used_b": 400000,
+                "free_b": 600000,
+                "used_pct": 40.0,
+            },
+            {
+                "mount": "/volume2",
+                "fs": "/dev/vg2/volume_2",
+                "device": "/dev/vg2/volume_2",
+                "total_b": 2000000,
+                "used_b": 500000,
+                "free_b": 1500000,
+                "used_pct": 25.0,
+            },
+        ],
+    )
+
+    assert "DSM volumes" in html
+    assert "/volume1" in html
+    assert "/dev/vg1/volume_1" in html
+    assert "Total" in html
+    assert "Used" in html
+    assert "Free" in html

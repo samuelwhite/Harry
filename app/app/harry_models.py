@@ -17,6 +17,11 @@ class DiskUsed(BaseModel):
     used_pct: float
     fs: Optional[str] = None
     size_gb: Optional[float] = None
+    device: Optional[str] = None
+    total_b: Optional[float] = None
+    used_b: Optional[float] = None
+    free_b: Optional[float] = None
+    pct: Optional[float] = None
 
 
 class Facts(BaseModel):

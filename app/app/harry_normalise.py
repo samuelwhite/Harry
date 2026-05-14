@@ -266,6 +266,12 @@ def normalise_for_schema(payload: Dict[str, Any], contract_version: str = "unkno
         item = {"mount": mount, "used_pct": used_pct_f}
         if is_022_plus and fs:
             item["fs"] = fs
+        if m.get("device") is not None:
+            item["device"] = str(m.get("device"))
+        for key in ("total_b", "used_b", "free_b", "pct", "size_gb"):
+            num = _num(m.get(key))
+            if num is not None:
+                item[key] = int(num) if key in ("total_b", "used_b", "free_b") else num
         disk_used_out.append(item)
 
     if mounts_raw:

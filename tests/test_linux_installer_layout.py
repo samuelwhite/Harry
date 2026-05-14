@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -310,6 +312,69 @@ def test_synology_memory_uses_cache_adjusted_calculation_when_memavailable_is_ba
     assert used_pct == "6.25"
     assert "DEBUG: memory method=calculated_cache_adjusted" in result.stderr
     assert "memory_method node=nas-1 platform=synology-dsm method=calculated_cache_adjusted" in log_file.read_text(encoding="utf-8")
+
+
+def test_synology_storage_telemetry_keeps_volume_mounts_and_skips_pseudo_mounts(tmp_path):
+    script = Path("agent/harry_agent.sh").read_text(encoding="utf-8")
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+
+    df = fakebin / "df.cmd"
+    df.write_text(
+        r"""@echo off
+echo Filesystem     1B-blocks      Used Available Use%% Mounted on
+echo /dev/vg1/volume_1 1000000   400000    600000  40%% /volume1
+echo /dev/vg2/volume_2 2000000   500000   1500000  25%% /volume2
+echo /dev/vg3/volume_3 3000000  1500000   1500000  50%% /volume3
+echo tmpfs           100000      1000     99000   1%% /run
+echo overlay         500000     10000    490000   2%% /var/lib/docker/overlay2/123
+echo /dev/loop0      100000      20000     80000  20%% /snap/test
+""",
+        encoding="utf-8",
+    )
+    os.chmod(df, 0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fakebin.as_posix()}{os.pathsep}{env.get('PATH', '')}"
+    env["HARRY_PLATFORM"] = "synology-dsm"
+    env["HARRY_BACKOFF_ENABLE"] = "0"
+    env["HARRY_SELF_UPDATE"] = "0"
+    env["HARRY_BASE_URL"] = "http://192.168." + "7.200:8789"
+    env["HARRY_INGEST_URL"] = "http://192.168." + "7.200:8789/ingest"
+    env["HARRY_AGENT_VERSION"] = "0.2.5"
+    env["HARRY_SCHEMA_VERSION"] = "0.2.3"
+    env["HARRY_BRAIN_VERSION"] = "2026.05.15"
+
+    python_code = script.split('"$PYTHON" - <<\'PY\' >"$TMP_PAYLOAD" 2>"$TMP_ERR"\n', 1)[1].rsplit("\nPY\n", 1)[0]
+    fake_df_output = """Filesystem     1B-blocks      Used Available Use% Mounted on\n/dev/vg1/volume_1 1000000   400000    600000  40% /volume1\n/dev/vg2/volume_2 2000000   500000   1500000  25% /volume2\n/dev/vg3/volume_3 3000000  1500000   1500000  50% /volume3\next4            500000      10000    490000   2% /var/lib/docker/containers/xyz\ntmpfs           100000      1000     99000   1% /run\noverlay         500000     10000    490000   2% /var/lib/docker/overlay2/123\n/dev/loop0      100000      20000     80000  20% /snap/test\n"""
+    python_code = (
+        "import shutil, subprocess\n"
+        "_orig_shutil_which = shutil.which\n"
+        "_orig_check_output = subprocess.check_output\n"
+        f"_fake_df_output = {fake_df_output!r}\n"
+        "shutil.which = lambda x: 'df.cmd' if x == 'df' else _orig_shutil_which(x)\n"
+        "def _fake_check_output(cmd, stderr=None, text=None, **kwargs):\n"
+        "    if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == 'df':\n"
+        "        return _fake_df_output\n"
+        "    return _orig_check_output(cmd, stderr=stderr, text=text, **kwargs)\n"
+        "subprocess.check_output = _fake_check_output\n"
+        + python_code
+    )
+    result = subprocess.run([sys.executable, "-c", python_code], env=env, capture_output=True, text=True, check=True)
+    payload = json.loads(result.stdout)
+    disk_used = payload["metrics"]["disk_used"]
+    storage_debug = payload["metrics"]["extensions"]["storage_debug"]
+
+    assert [m["mount"] for m in disk_used] == ["/volume1", "/volume2", "/volume3"]
+    assert disk_used[0]["fs"] == "/dev/vg1/volume_1"
+    assert disk_used[0]["total_b"] == 1000000
+    assert disk_used[0]["used_b"] == 400000
+    assert disk_used[0]["free_b"] == 600000
+    assert disk_used[0]["used_pct"] == 40.0
+    assert disk_used[0]["device"] == "/dev/vg1/volume_1"
+    assert any("pseudo_filesystem" in line and "tmpfs" in line for line in storage_debug)
+    assert any("docker_runtime_mount" in line for line in storage_debug)
+    assert any("loop_mount" in line for line in storage_debug)
 
 
 def test_update_harry_script_describes_safe_update_flow():

@@ -60,6 +60,21 @@ def _display_node_name(name: str) -> str:
     return node_display_name(name)
 
 
+def _format_bytes(value: Any) -> str:
+    num = _to_float(value)
+    if num is None:
+        return "—"
+    if num >= 1024 ** 4:
+        return f"{num / 1024 ** 4:.2f} TB"
+    if num >= 1024 ** 3:
+        return f"{num / 1024 ** 3:.2f} GB"
+    if num >= 1024 ** 2:
+        return f"{num / 1024 ** 2:.1f} MB"
+    if num >= 1024:
+        return f"{num / 1024:.1f} KB"
+    return f"{int(num)} B"
+
+
 def _fleet_sidebar(hours: int, debug: bool) -> List[Dict[str, Any]]:
     debug_q = "&debug=1" if debug else ""
     return [
@@ -666,6 +681,16 @@ def _get_disk_physical(payload: Dict[str, Any], metrics: Dict[str, Any], raw: Di
     return []
 
 
+def _get_storage_mounts(metrics: Dict[str, Any], raw: Dict[str, Any]) -> List[Dict[str, Any]]:
+    mounts = metrics.get("disk_used")
+    if not isinstance(mounts, list) or not mounts:
+        raw_metrics = raw.get("metrics") if isinstance(raw.get("metrics"), dict) else {}
+        mounts = raw_metrics.get("disk_used")
+    if isinstance(mounts, list):
+        return [m for m in mounts if isinstance(m, dict)]
+    return []
+
+
 def _get_gpu_list(metrics: Dict[str, Any], raw: Dict[str, Any]) -> List[Dict[str, Any]]:
     g = metrics.get("gpu")
     if isinstance(g, list) and g:
@@ -1071,6 +1096,7 @@ class NodeView:
     worst: str
     headline: str
     disks_physical: List[Dict[str, Any]]
+    storage_mounts: List[Dict[str, Any]]
     gpus: List[Dict[str, Any]]
     trend_ram_svg: str
     trend_disk_svg: str
@@ -1132,6 +1158,7 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
     disk_used_pct = _pick_disk_used_pct(metrics)
 
     disks_physical = _get_disk_physical(payload, metrics, raw)
+    storage_mounts = _get_storage_mounts(metrics, raw)
     gpus = _get_gpu_list(metrics, raw)
 
     hist = _fetch_history(conn, node, hours=hours)
@@ -1240,6 +1267,7 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
         worst=worst,
         headline=headline,
         disks_physical=disks_physical,
+        storage_mounts=storage_mounts,
         gpus=gpus,
         trend_ram_svg=_sparkline(series["ram"]),
         trend_disk_svg=_sparkline(series["disk"]),
@@ -1384,44 +1412,78 @@ def _render_debug(nv: NodeView) -> str:
 """
 
 
-def _render_storage_physical(disks: List[Dict[str, Any]]) -> str:
-    if not disks:
+def _render_storage_physical(disks: List[Dict[str, Any]], mounts: List[Dict[str, Any]] | None = None) -> str:
+    mounts = mounts or []
+    if not disks and not mounts:
         return "<div class='muted'>No disk data.</div>"
     blocks: List[str] = []
-    for d in disks[:6]:
-        disk = _safe_str(d.get("disk") or "disk")
-        size = _safe_str(d.get("size") or d.get("disk_size") or "")
-        model = _safe_str(d.get("model") or d.get("disk_model") or "")
-        serial = _safe_str(d.get("serial") or d.get("disk_serial") or "")
-        pct = _fnum(d.get("pct"))
-        mounts = d.get("mounts") if isinstance(d.get("mounts"), list) else []
+    if disks:
+        blocks.append("<div class='disksectiontitle'>Physical disks</div>")
+        for d in disks[:6]:
+            disk = _safe_str(d.get("disk") or "disk")
+            size = _safe_str(d.get("size") or d.get("disk_size") or "")
+            model = _safe_str(d.get("model") or d.get("disk_model") or "")
+            serial = _safe_str(d.get("serial") or d.get("disk_serial") or "")
+            pct = _fnum(d.get("pct"))
+            disk_mounts = d.get("mounts") if isinstance(d.get("mounts"), list) else []
 
-        headline = f"{disk} ({size} • {model})".strip()
-        pct_txt = "—" if pct is None else f"{pct:.1f}%"
-        bar_pct = 0.0 if pct is None else _clamp(pct, 0, 100)
+            headline = f"{disk} ({size} • {model})".strip()
+            pct_txt = "—" if pct is None else f"{pct:.1f}%"
+            bar_pct = 0.0 if pct is None else _clamp(pct, 0, 100)
 
-        lines = []
-        for m in mounts[:10]:
+            lines = []
+            for m in disk_mounts[:10]:
+                if not isinstance(m, dict):
+                    continue
+                mp = _safe_str(m.get("mount") or "")
+                mpct = _fnum(m.get("pct") if m.get("pct") is not None else m.get("used_pct"))
+                mpct_txt = "—" if mpct is None else f"{mpct:.1f}%"
+                lines.append(f"<div class='kv'><span class='k'>{_html_escape(mp)}</span><span class='v'>{_html_escape(mpct_txt)}</span></div>")
+
+            extra = f" • SN {serial}" if serial else ""
+            blocks.append(
+                f"""
+                <div class="diskblock">
+                  <div class="diskhead">
+                    <div class="diskname">{_html_escape(headline)}{_html_escape(extra)}</div>
+                    <div class="diskpct">{_html_escape(pct_txt)}</div>
+                  </div>
+                  <div class="bar"><div class="fill" style="width:{bar_pct:.1f}%"></div></div>
+                  <div class="diskmounts">{''.join(lines)}</div>
+                </div>
+                """
+            )
+
+    if mounts:
+        blocks.append("<div class='disksectiontitle'>DSM volumes</div>")
+        for m in mounts[:12]:
             if not isinstance(m, dict):
                 continue
-            mp = _safe_str(m.get("mount") or "")
-            mpct = _fnum(m.get("pct") if m.get("pct") is not None else m.get("used_pct"))
-            mpct_txt = "—" if mpct is None else f"{mpct:.1f}%"
-            lines.append(f"<div class='kv'><span class='k'>{_html_escape(mp)}</span><span class='v'>{_html_escape(mpct_txt)}</span></div>")
-
-        extra = f" • SN {serial}" if serial else ""
-        blocks.append(
-            f"""
-            <div class="diskblock">
-              <div class="diskhead">
-                <div class="diskname">{_html_escape(headline)}{_html_escape(extra)}</div>
-                <div class="diskpct">{_html_escape(pct_txt)}</div>
-              </div>
-              <div class="bar"><div class="fill" style="width:{bar_pct:.1f}%"></div></div>
-              <div class="diskmounts">{''.join(lines)}</div>
-            </div>
-            """
-        )
+            mount = _safe_str(m.get("mount") or "")
+            fs = _safe_str(m.get("fs") or m.get("device") or "")
+            used_pct = _fnum(m.get("used_pct") if m.get("used_pct") is not None else m.get("pct"))
+            total_b = m.get("total_b")
+            used_b = m.get("used_b")
+            free_b = m.get("free_b")
+            pct_txt = "—" if used_pct is None else f"{used_pct:.1f}%"
+            bar_pct = 0.0 if used_pct is None else _clamp(used_pct, 0, 100)
+            blocks.append(
+                f"""
+                <div class="diskblock">
+                  <div class="diskhead">
+                    <div class="diskname">{_html_escape(mount)}</div>
+                    <div class="diskpct">{_html_escape(pct_txt)}</div>
+                  </div>
+                  <div class="bar"><div class="fill" style="width:{bar_pct:.1f}%"></div></div>
+                  <div class="diskmounts">
+                    <div class="kv"><span class="k">Device</span><span class="v">{_html_escape(fs or '—')}</span></div>
+                    <div class="kv"><span class="k">Total</span><span class="v">{_html_escape(_format_bytes(total_b))}</span></div>
+                    <div class="kv"><span class="k">Used</span><span class="v">{_html_escape(_format_bytes(used_b))}</span></div>
+                    <div class="kv"><span class="k">Free</span><span class="v">{_html_escape(_format_bytes(free_b))}</span></div>
+                  </div>
+                </div>
+                """
+            )
     return "".join(blocks)
 
 
@@ -2064,7 +2126,7 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
     <div class="row row3">
       <div class="panel">
         <div class="ph">STORAGE (PHYSICAL)</div>
-        <div class="pv">{_render_storage_physical(nv.disks_physical)}</div>
+        <div class="pv">{_render_storage_physical(nv.disks_physical, nv.storage_mounts)}</div>
       </div>
       <div class="panel">
         <div class="ph">GPUS</div>
