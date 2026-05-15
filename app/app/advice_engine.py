@@ -8,6 +8,8 @@ import sqlite3
 import json
 import re
 
+from app.units import format_capacity_gb
+
 
 # -----------------------------
 # Helpers
@@ -655,9 +657,9 @@ def build_advice_and_health(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any
             # Message + headroom line when available
             eta_str = _fmt_eta(eta)
             if free_gb is not None and gb_per_day is not None and gb_per_day > 0.01:
-                headroom = f"~{free_gb:.0f}GB free, growing ~{gb_per_day:.1f}GB/day."
+                headroom = f"~{format_capacity_gb(free_gb)} free, growing ~{format_capacity_gb(gb_per_day)}/day."
             elif free_gb is not None:
-                headroom = f"~{free_gb:.0f}GB free."
+                headroom = f"~{format_capacity_gb(free_gb)} free."
             else:
                 headroom = f"Growing ~{slope:.2f}%/day."
 

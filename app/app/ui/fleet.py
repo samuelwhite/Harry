@@ -13,6 +13,7 @@ from app.activity_feed import prepare_activity_items
 from app.health import compute_health
 from app.rules import evaluate as rules_evaluate
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
+from app.units import format_bytes_human
 from app.service_awareness import build_service_rows, has_explicit_service_configuration
 from app.node_metadata import node_display_name, node_meta_summary, node_route_id, prime_privacy_aliases
 from app.db_helpers import _db_path
@@ -68,18 +69,7 @@ def invalidate_view_cache() -> None:
 
 
 def _format_bytes(value: Any) -> str:
-    num = _to_float(value)
-    if num is None:
-        return "—"
-    if num >= 1024 ** 4:
-        return f"{num / 1024 ** 4:.2f} TB"
-    if num >= 1024 ** 3:
-        return f"{num / 1024 ** 3:.2f} GB"
-    if num >= 1024 ** 2:
-        return f"{num / 1024 ** 2:.1f} MB"
-    if num >= 1024:
-        return f"{num / 1024:.1f} KB"
-    return f"{int(num)} B"
+    return format_bytes_human(value)
 
 
 def _fleet_sidebar(hours: int, debug: bool) -> List[Dict[str, Any]]:

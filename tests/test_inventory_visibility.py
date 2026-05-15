@@ -11,7 +11,8 @@ def test_inventory_helpers_show_all_disks_gpus_and_network_interfaces():
         {"name": "Disk 1", "type": "NVMe", "size_gb": 512},
         {"name": "Disk 2", "type": "SATA", "size_gb": 1024},
         {"name": "Disk 3", "type": "SATA", "size_gb": 2048},
-        {"name": "Disk 4", "type": "USB", "size_gb": 256},
+        {"name": "Disk 4", "type": "SATA", "size_gb": 1900},
+        {"name": "Disk 5", "type": "USB", "size_gb": 256},
     ]
     gpus = [
         {"name": "NVIDIA RTX 3080", "mem_total_mb": 10240, "capability_hint": "CUDA capable"},
@@ -28,7 +29,8 @@ def test_inventory_helpers_show_all_disks_gpus_and_network_interfaces():
     nic_text = inventory_ui._fmt_nic_brief(nics)
 
     assert "Disk 1" in disk_text
-    assert "Disk 4" in disk_text
+    assert "Disk 5" in disk_text
+    assert "1.9TB" in disk_text
     assert "NVIDIA RTX 3080" in gpu_text
     assert "AMD Radeon RX 7800 XT" in gpu_text
     assert "Ethernet" in nic_text

@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Tuple
 
 from app.node_metadata import node_display_name, node_meta_summary, node_route_id, prime_privacy_aliases
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
+from app.units import format_capacity_gb
 from app.ui.capabilities import gpu_state_message, gpu_capability_hint
 from app.ui.fleet import _advice_ack_state, _advice_normalised_snapshot, _render_recommendations_panel
 
@@ -248,7 +249,7 @@ def _inventory_md(rows: List[Dict[str, Any]]) -> str:
                 name = d.get("name") or d.get("model") or "disk"
                 size = d.get("size_gb")
                 dtype = d.get("type") or "—"
-                size_txt = f"{size}GB" if size is not None else "—"
+                size_txt = format_capacity_gb(size)
                 lines.append(f"  - `{name}` · `{dtype}` · `{size_txt}`")
 
         gpus = r.get("gpus") or []
@@ -307,7 +308,7 @@ def _fmt_disk_brief(disks: List[Dict[str, Any]]) -> str:
         name = d.get("name") or d.get("model") or "disk"
         dtype = d.get("type") or "—"
         size = d.get("size_gb")
-        size_txt = f"{size}GB" if size is not None else "—"
+        size_txt = format_capacity_gb(size)
         bits.append(f"{name} · {dtype} · {size_txt}")
 
     return "<br>".join(bits)
