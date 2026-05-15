@@ -9,7 +9,7 @@ from app.machine_summary import get_machine_summary
 from app.node_metadata import node_display_name, node_meta_summary, node_route_id, prime_privacy_aliases
 from app.node_metadata import privacy_mode_enabled
 from app.versions import AGENT_VERSION, BRAIN_VERSION
-from app.ui.fleet import _advice_normalised_snapshot, _render_advice_summary
+from app.ui.fleet import _advice_ack_state, _advice_normalised_snapshot, _render_recommendations_panel
 
 from .db import get_latest_node_record, get_latest_node_records, _load_schema_current, _raw_payload
 from .templates import _html_escape, render_shell
@@ -85,6 +85,8 @@ def render_node_detail(node: str, hours: int) -> str:
     raw = _raw_payload(payload)
     summary = get_machine_summary(payload)
     advice = _advice_normalised_snapshot(payload)
+    active_advice, acknowledged_advice = _advice_ack_state(node, advice)
+    advice = active_advice + acknowledged_advice
 
     pretty_payload_text = json.dumps(payload, indent=2, ensure_ascii=False)
     pretty_raw_text = json.dumps(raw, indent=2, ensure_ascii=False) if raw else ""
@@ -124,7 +126,7 @@ def render_node_detail(node: str, hours: int) -> str:
   </div>
 
   <div class="panel">
-    {_render_advice_summary(advice)}
+    {_render_recommendations_panel(node, advice, next_url=f"/node/{node_route_id(node)}?hours={hours}")}
   </div>
 </div>
 """

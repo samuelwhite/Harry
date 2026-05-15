@@ -256,7 +256,12 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
     info_n = sum(
         1
         for n in nodeviews
-        if not n.stale and any(str(a.get("severity") or "").lower() == "info" for a in (n.advice or []))
+        if not n.stale
+        and any(
+            str(a.get("severity") or "").lower() == "info"
+            and not bool(a.get("acknowledged"))
+            for a in (n.advice or [])
+        )
     )
     healthy_n = max(0, len(nodeviews) - stale_n - bad_n - warn_n)
 
@@ -278,7 +283,7 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
         if (not n.stale) and n.health_state == "warning" and (n.age_minutes is not None and n.age_minutes > 15)
     )
 
-    advice_total = sum(len(n.advice or []) for n in nodeviews)
+    advice_total = sum(1 for n in nodeviews for a in (n.advice or []) if isinstance(a, dict) and not bool(a.get("acknowledged")))
 
     schema_current = _load_schema_current()
     sidebar_footer = (
@@ -330,6 +335,28 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
 </div>
 """
 
+    acknowledged_count = sum(
+        1
+        for nv in nodeviews
+        for a in (nv.advice or [])
+        if isinstance(a, dict) and bool(a.get("acknowledged"))
+    )
+    acknowledged_html = ""
+    if acknowledged_count:
+        acknowledged_html = f"""
+<div class="divider"></div>
+
+<div class="section" id="acknowledged-warnings">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">Acknowledged warnings</div>
+      <div class="h2sub">Known issues that have been acknowledged and muted on the overview.</div>
+    </div>
+  </div>
+  {_render_advice_queue(nodeviews, include_info=True, acknowledged_only=True)}
+</div>
+"""
+
     content = f"""
 <div class="section" id="diagnostic-summary">
   <div class="sectionhead">
@@ -347,6 +374,8 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
 </div>
 
 {recommendations_html}
+
+{acknowledged_html}
 
 <div class="divider"></div>
 

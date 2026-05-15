@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import time
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ from app.ui.db import (
     _safe_str,
     _utcnow,
     _clamp,
+    get_acknowledged_recommendation_keys,
     get_latest_node_records,
     get_recent_events,
 )
@@ -58,6 +60,11 @@ _HIDDENNODE_CACHE: Dict[Tuple[str, int, int], Tuple[float, List["NodeView"]]] = 
 
 def _display_node_name(name: str) -> str:
     return node_display_name(name)
+
+
+def invalidate_view_cache() -> None:
+    _NODEVIEW_CACHE.clear()
+    _HIDDENNODE_CACHE.clear()
 
 
 def _format_bytes(value: Any) -> str:
@@ -146,6 +153,20 @@ def _advice_text(advice_item: Dict[str, Any]) -> str:
     return msg or rec
 
 
+def _advice_key(advice_item: Dict[str, Any]) -> str:
+    key = _safe_str(advice_item.get("id") or advice_item.get("code") or "").strip()
+    if key:
+        return key
+
+    category = _safe_str(advice_item.get("category") or "").strip().lower()
+    field = _safe_str(advice_item.get("field") or "").strip().lower()
+    msg = _safe_str(advice_item.get("message") or advice_item.get("text") or "").strip().lower()
+    seed = "|".join(part for part in (category, field, msg) if part)
+    if not seed:
+        seed = "advice"
+    return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
+
+
 def _advice_is_visible(advice_item: Dict[str, Any], *, include_info: bool) -> bool:
     sev = _advice_severity(advice_item)
     if sev in ("bad", "warn"):
@@ -155,6 +176,27 @@ def _advice_is_visible(advice_item: Dict[str, Any], *, include_info: bool) -> bo
 
 def _visible_advice(advice: List[Dict[str, Any]], *, include_info: bool) -> List[Dict[str, Any]]:
     return [a for a in advice if isinstance(a, dict) and _advice_is_visible(a, include_info=include_info)]
+
+
+def _advice_ack_state(node: str, advice: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    acked_keys = get_acknowledged_recommendation_keys(node)
+    active: List[Dict[str, Any]] = []
+    acknowledged: List[Dict[str, Any]] = []
+
+    for item in advice:
+        if not isinstance(item, dict):
+            continue
+        annotated = dict(item)
+        annotated["advice_key"] = _advice_key(item)
+        annotated["acknowledged"] = annotated["advice_key"] in acked_keys
+        if str(annotated.get("category") or "").lower() == "heartbeat":
+            annotated["acknowledged"] = False
+        if annotated["acknowledged"]:
+            acknowledged.append(annotated)
+        else:
+            active.append(annotated)
+
+    return active, acknowledged
 
 
 def _render_advice_summary(advice: List[Dict[str, Any]], *, include_info: bool = True, empty_text: str = "All clear. (Boring is good.)") -> str:
@@ -177,6 +219,62 @@ def _render_advice_summary(advice: List[Dict[str, Any]], *, include_info: bool =
         )
 
     return "".join(rows) if rows else f"<div class='muted'>{_html_escape(empty_text)}</div>"
+
+
+def _render_recommendations_panel(
+    node: str,
+    advice: List[Dict[str, Any]],
+    *,
+    next_url: str,
+    include_info: bool = True,
+) -> str:
+    active, acknowledged = _advice_ack_state(node, advice)
+    active_visible = _visible_advice(active, include_info=include_info)
+    acknowledged_visible = _visible_advice(acknowledged, include_info=include_info)
+
+    if not active_visible and not acknowledged_visible:
+        return "<div class='muted'>No active recommendations.</div>"
+
+    rows: List[str] = []
+    if active_visible:
+        rows.append("<div class='subcardtitle'>Active recommendations</div>")
+        for item in active_visible[:4]:
+            sev = _advice_severity(item)
+            badge_sev = "bad" if sev == "bad" else ("warn" if sev == "warn" else "info")
+            text = _advice_text(item)
+            if not text:
+                continue
+            action = _action_form(
+                _node_action_url(node, "ack", next_url, key=item.get("advice_key") or _advice_key(item)),
+                "Acknowledge",
+            )
+            rows.append(
+                f"<div class='adviceitem'>"
+                f"<span class='tag {badge_sev}'>{_html_escape(sev)}</span>"
+                f"<span class='msg'>{_html_escape(text)}</span>"
+                f"<span style='margin-left:auto;'>{action}</span>"
+                f"</div>"
+            )
+
+    if acknowledged_visible:
+        rows.append("<div class='subcardtitle' style='margin-top:12px;'>Acknowledged warnings</div>")
+        for item in acknowledged_visible[:4]:
+            text = _advice_text(item)
+            if not text:
+                continue
+            action = _action_form(
+                _node_action_url(node, "restore", next_url, key=item.get("advice_key") or _advice_key(item)),
+                "Restore warning",
+            )
+            rows.append(
+                f"<div class='adviceitem acknowledged'>"
+                f"<span class='tag ack'>acknowledged</span>"
+                f"<span class='msg'>{_html_escape(text)}</span>"
+                f"<span style='margin-left:auto;'>{action}</span>"
+                f"</div>"
+            )
+
+    return "".join(rows)
 
 
 def _headline_line(sev: str) -> str:
@@ -748,6 +846,12 @@ def _advice_normalised_snapshot(snapshot: Dict[str, Any]) -> List[Dict[str, Any]
     except Exception:
         pass
 
+    for a in out:
+        try:
+            a["advice_key"] = _advice_key(a)
+        except Exception:
+            a["advice_key"] = "advice"
+
     sev_rank = {"bad": 0, "warn": 1, "info": 2, "ok": 3}
     out.sort(key=lambda a: (sev_rank.get(str(a.get("severity") or "ok").lower(), 9), str(a.get("message") or "").lower()))
     return out
@@ -1137,8 +1241,11 @@ def _agent_version_state(actual: str, expected: str) -> str:
     return "behind"
 
 
-def _node_action_url(node: str, action: str, next_url: str) -> str:
-    return f"/node/{quote(node_route_id(node), safe='')}/{action}?next={quote(next_url, safe='')}"
+def _node_action_url(node: str, action: str, next_url: str, *, key: Optional[str] = None) -> str:
+    url = f"/node/{quote(node_route_id(node), safe='')}/{action}?next={quote(next_url, safe='')}"
+    if key:
+        url += f"&key={quote(str(key), safe='')}"
+    return url
 
 
 def _action_form(url: str, label: str, confirm_text: Optional[str] = None) -> str:
@@ -1267,25 +1374,39 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
     delayed = health_state == "warning" and any("delayed" in str(r).lower() for r in (health.get("reasons") or []))
 
     if stale:
-        advice = [{"severity": "bad", "message": f"Node has stopped reporting (last seen {_ago(ts)})."}] + advice
+        advice = [{"id": "node_stale", "category": "heartbeat", "severity": "bad", "message": f"Node has stopped reporting (last seen {_ago(ts)})."}] + advice
     elif delayed:
-        advice = [{"severity": "warn", "message": f"Node reporting delayed (last seen {_ago(ts)})."}] + advice
+        advice = [{"id": "node_delayed", "category": "heartbeat", "severity": "warn", "message": f"Node reporting delayed (last seen {_ago(ts)})."}] + advice
 
-    real_warn = sum(1 for a in advice if str(a.get("severity")).lower() == "warn")
-    real_bad = sum(1 for a in advice if str(a.get("severity")).lower() == "bad")
-    advice_sev = "bad" if real_bad else ("warn" if real_warn else "ok")
+    advice = list(advice)
+    active_advice, acknowledged_advice = _advice_ack_state(node, advice)
+
+    real_warn = sum(1 for a in active_advice if str(a.get("severity")).lower() == "warn")
+    real_bad = sum(1 for a in active_advice if str(a.get("severity")).lower() == "bad")
+    ack_warn = sum(1 for a in acknowledged_advice if str(a.get("severity")).lower() == "warn")
+    ack_bad = sum(1 for a in acknowledged_advice if str(a.get("severity")).lower() == "bad")
+    ack_total = len(acknowledged_advice)
+    advice_sev = "bad" if real_bad else ("warn" if real_warn else ("ok" if not acknowledged_advice else "ok"))
 
     if stale:
         worst = "stale"
     elif delayed:
         worst = "warn"
     else:
-        worst = _worst_severity([a for a in advice if str(a.get("severity")).lower() in ("warn", "bad")])
+        worst = _worst_severity([a for a in active_advice if str(a.get("severity")).lower() in ("warn", "bad")])
 
     if stale:
         headline = status_copy(stale=True)
     elif delayed:
         headline = status_copy(delayed=True)
+    elif acknowledged_advice and not active_advice:
+        headline = status_copy(
+            health_state="healthy",
+            cpu_pressure_now=None,
+            disk_used_pct=None,
+            gpus=gpus,
+            capabilities=capabilities,
+        )
     else:
         headline = status_copy(
             health_state=health_state,
@@ -1347,9 +1468,9 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
         health_state=health_state,
         health_score=health_score,
         age_minutes=age_minutes,
-        advice=advice,
+        advice=active_advice + acknowledged_advice,
         advice_sev=advice_sev,
-        advice_counts={"warn": real_warn, "bad": real_bad},
+        advice_counts={"warn": real_warn, "bad": real_bad, "ack_warn": ack_warn, "ack_bad": ack_bad, "ack_total": ack_total},
         worst=worst,
         headline=headline,
         disks_physical=disks_physical,
@@ -1422,6 +1543,8 @@ def _top_action(nv: NodeView) -> Optional[Tuple[str, str]]:
         return None
     for sev in ("bad", "warn", "info"):
         for a in nv.advice:
+            if bool(a.get("acknowledged")):
+                continue
             if _advice_severity(a) == sev:
                 msg = _advice_text(a)
                 if msg:
@@ -1480,9 +1603,10 @@ def _render_advice(advice: List[Dict[str, Any]]) -> str:
     for a in advice[:10]:
         sev = _advice_severity(a)
         msg = _advice_text(a)
-        tag_class = "info" if sev == "info" else sev
+        tag_class = "ack" if a.get("acknowledged") else ("info" if sev == "info" else sev)
+        sev_label = "acknowledged" if a.get("acknowledged") else sev
         out.append(
-            f"<div class='adviceitem'><span class='tag {tag_class}'>{_html_escape(sev)}</span>"
+            f"<div class='adviceitem{' acknowledged' if a.get('acknowledged') else ''}'><span class='tag {tag_class}'>{_html_escape(sev_label)}</span>"
             f"<span class='msg'>{_html_escape(msg)}</span></div>"
         )
     return "".join(out)
@@ -1785,10 +1909,12 @@ def _render_inventory_table(nodeviews: List[NodeView], hours: int) -> str:
                 adv = _badge_text("bad", f"BAD {nv.advice_counts.get('bad', 0)}")
             elif sev == "warn":
                 adv = _badge_text("warn", f"WARN {nv.advice_counts.get('warn', 0)}")
+            elif nv.advice_counts.get("ack_total", 0):
+                adv = _badge_text("neutral", f"ACK {nv.advice_counts.get('ack_total', 0)}")
             else:
                 adv = _badge_text("ok", "OK")
             ta = _top_action(nv)
-            hint = ta[1] if ta else f"CPU {nv.cpu_pressure_band}"
+            hint = ta[1] if ta else (f"{nv.advice_counts.get('ack_total', 0)} acknowledged recommendation(s)." if nv.advice_counts.get("ack_total", 0) else f"CPU {nv.cpu_pressure_band}")
 
         hide_btn = _action_form(_node_action_url(nv.node, "hide", next_url), "Hide")
 
@@ -1831,7 +1957,12 @@ def _render_inventory_table(nodeviews: List[NodeView], hours: int) -> str:
 """
 
 
-def _render_advice_queue(nodeviews: List[NodeView], *, include_info: bool = False) -> str:
+def _render_advice_queue(
+    nodeviews: List[NodeView],
+    *,
+    include_info: bool = False,
+    acknowledged_only: bool = False,
+) -> str:
     items: List[Tuple[int, float, str, str, str, str]] = []
 
     sev_rank = {"stale": 0, "bad": 1, "warn": 2, "info": 3}
@@ -1842,6 +1973,11 @@ def _render_advice_queue(nodeviews: List[NodeView], *, include_info: bool = Fals
             continue
 
         for a in nv.advice:
+            acknowledged = bool(a.get("acknowledged"))
+            if acknowledged_only and not acknowledged:
+                continue
+            if not acknowledged_only and acknowledged:
+                continue
             sev = _advice_severity(a)
             if sev not in ("bad", "warn", "info"):
                 continue
@@ -1853,7 +1989,7 @@ def _render_advice_queue(nodeviews: List[NodeView], *, include_info: bool = Fals
             items.append((sev_rank.get(sev, 9), -(nv.activity_score), nv.node, sev.upper(), msg, nv.model or ""))
 
     if not items:
-        return "<div class='muted'>No active recommendations.</div>"
+        return "<div class='muted'>No acknowledged warnings.</div>" if acknowledged_only else "<div class='muted'>No active recommendations.</div>"
 
     items.sort(key=lambda t: (t[0], t[1], t[2], t[4]))
 
@@ -1861,7 +1997,7 @@ def _render_advice_queue(nodeviews: List[NodeView], *, include_info: bool = Fals
     for _, _, node, label, msg, model in items[:40]:
         display_name = _display_node_name(node)
         sev_cls = "stale" if label == "STALE" else label.lower()
-        badge = _badge_text(sev_cls, label)
+        badge = _badge_text(sev_cls, "acknowledged" if acknowledged_only and label != "STALE" else label)
         rows.append(
             f"""
 <div class="advrow">
@@ -2123,6 +2259,8 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
             pills.insert(0, _pill("bad", f"ADVICE · BAD {nv.advice_counts.get('bad', 0)}"))
         elif sev == "warn":
             pills.insert(0, _pill("warn", f"ADVICE · WARN {nv.advice_counts.get('warn', 0)}"))
+        elif nv.advice_counts.get("ack_total", 0):
+            pills.insert(0, _pill("neutral", f"ADVICE · ACKED {nv.advice_counts.get('ack_total', 0)}"))
         else:
             pills.insert(0, _pill("neutral", "ADVICE · OK"))
 
@@ -2135,6 +2273,15 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
             f'<div style="margin-top:8px;">'
             f'{_pill(pill_sev, "Recommendation")} '
             f'<span class="muted" style="font-size:13px;">{_html_escape(msg)}</span>'
+            f"</div>"
+        )
+    elif nv.advice_counts.get("ack_total", 0):
+        top_action_line = (
+            f'<div style="margin-top:8px;">'
+            f'{_pill("neutral", "Acknowledged")} '
+            f'<span class="muted" style="font-size:13px;">'
+            f"{_html_escape(str(nv.advice_counts.get('ack_total', 0)))} recommendation(s) are acknowledged."
+            f"</span>"
             f"</div>"
         )
 

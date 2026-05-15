@@ -77,6 +77,31 @@ def _ensure_hidden_nodes_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _ensure_acknowledged_recommendations_table(conn: sqlite3.Connection) -> None:
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS acknowledged_recommendations (
+                node TEXT NOT NULL,
+                advice_key TEXT NOT NULL,
+                acknowledged_at TEXT NOT NULL,
+                reason TEXT,
+                expires_at TEXT,
+                PRIMARY KEY (node, advice_key)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_acknowledged_recommendations_node ON acknowledged_recommendations(node)"
+        )
+        conn.commit()
+    except Exception:
+        # If the database path is read-only or otherwise unavailable, keep
+        # rendering and read-only behavior working. Acknowledgements will only
+        # persist once the Brain has a writable local DB.
+        pass
+
+
 def _ensure_events_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -105,6 +130,7 @@ def _db() -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     _ensure_hidden_nodes_table(conn)
+    _ensure_acknowledged_recommendations_table(conn)
     _ensure_events_table(conn)
     return conn
 
@@ -170,6 +196,32 @@ def _fetch_latest_hidden_per_node(conn: sqlite3.Connection) -> Dict[str, Dict[st
             "row_id": row["id"],
             "hidden_at": row["hidden_at"],
         }
+    return out
+
+
+def _fetch_acknowledged_recommendations(conn: sqlite3.Connection, node: str | None = None) -> List[Dict[str, Any]]:
+    q = """
+    SELECT node, advice_key, acknowledged_at, reason, expires_at
+    FROM acknowledged_recommendations
+    """
+    params: tuple[Any, ...] = ()
+    if node:
+        q += " WHERE node = ?"
+        params = (node,)
+    q += " ORDER BY acknowledged_at DESC, node ASC, advice_key ASC"
+
+    rows = conn.execute(q, params).fetchall()
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        out.append(
+            {
+                "node": row["node"],
+                "advice_key": row["advice_key"],
+                "acknowledged_at": row["acknowledged_at"],
+                "reason": row["reason"],
+                "expires_at": row["expires_at"],
+            }
+        )
     return out
 
 
@@ -409,9 +461,70 @@ def delete_node(node: str) -> None:
         return
     with _db() as conn:
         conn.execute("DELETE FROM hidden_nodes WHERE node = ?", (node,))
+        conn.execute("DELETE FROM acknowledged_recommendations WHERE node = ?", (node,))
         if _db_has_ingest(conn):
             conn.execute("DELETE FROM ingest WHERE node = ?", (node,))
         conn.commit()
+
+
+def acknowledge_recommendation(
+    node: str,
+    advice_key: str,
+    *,
+    reason: Optional[str] = None,
+    expires_at: Optional[str] = None,
+) -> None:
+    node = (node or "").strip()
+    advice_key = (advice_key or "").strip()
+    if not node or not advice_key:
+        return
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO acknowledged_recommendations (node, advice_key, acknowledged_at, reason, expires_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(node, advice_key) DO UPDATE SET
+                acknowledged_at = excluded.acknowledged_at,
+                reason = excluded.reason,
+                expires_at = excluded.expires_at
+            """,
+            (node, advice_key, _utcnow().isoformat().replace("+00:00", "Z"), reason, expires_at),
+        )
+        conn.commit()
+
+
+def restore_recommendation(node: str, advice_key: str) -> None:
+    node = (node or "").strip()
+    advice_key = (advice_key or "").strip()
+    if not node or not advice_key:
+        return
+    with _db() as conn:
+        conn.execute(
+            "DELETE FROM acknowledged_recommendations WHERE node = ? AND advice_key = ?",
+            (node, advice_key),
+        )
+        conn.commit()
+
+
+def get_acknowledged_recommendation_keys(node: str) -> set[str]:
+    node = (node or "").strip()
+    if not node:
+        return set()
+    try:
+        with _db() as conn:
+            rows = _fetch_acknowledged_recommendations(conn, node)
+        return {str(row["advice_key"]) for row in rows if row.get("advice_key")}
+    except Exception:
+        return set()
+
+
+def get_acknowledged_recommendations(node: str | None = None) -> List[Dict[str, Any]]:
+    try:
+        with _db() as conn:
+            rows = _fetch_acknowledged_recommendations(conn, node)
+        return rows
+    except Exception:
+        return []
 
 
 def get_dump(hours: int = DUMP_DEFAULT_HOURS) -> Dict[str, Any]:

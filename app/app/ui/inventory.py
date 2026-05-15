@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Tuple
 from app.node_metadata import node_display_name, node_meta_summary, node_route_id, prime_privacy_aliases
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
 from app.ui.capabilities import gpu_state_message, gpu_capability_hint
-from app.ui.fleet import _advice_normalised_snapshot, _render_advice_summary
+from app.ui.fleet import _advice_ack_state, _advice_normalised_snapshot, _render_recommendations_panel
 
 from .db import (
     _db,
@@ -158,6 +158,8 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
     disks = facts.get("disks") if isinstance(facts.get("disks"), list) else []
     gpus = facts.get("gpus") if isinstance(facts.get("gpus"), list) else []
     advice = _advice_normalised_snapshot(payload)
+    active_advice, acknowledged_advice = _advice_ack_state(node, advice)
+    advice = active_advice + acknowledged_advice
 
     metrics = _get_metrics(payload)
     if not gpus:
@@ -388,6 +390,13 @@ def render_inventory_page(hours: int, debug: bool) -> str:
         nics = r.get("network_interfaces") or []
         advice = r.get("advice") or []
         capabilities = r.get("capabilities") or {}
+        recommendation_html = ""
+        if advice:
+            recommendation_html = _render_recommendations_panel(
+                node,
+                advice,
+                next_url=f"/inventory?hours={hours}#node-details",
+            )
 
         table_rows.append(
             f"""
@@ -438,7 +447,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
     </div>
   </div>
 {_render_network_interfaces_card(nics)}
-{f'<div class="subcard" style="margin-top:12px;"><div class="subcardtitle">Recommendations</div><div class="subcardbody">{_render_advice_summary(advice)}</div></div>' if advice else ''}
+{f'<div class="subcard" style="margin-top:12px;"><div class="subcardtitle">Recommendations</div><div class="subcardbody">{recommendation_html}</div></div>' if recommendation_html else ''}
 </div>
 """
         )

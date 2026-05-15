@@ -26,15 +26,17 @@ from app.ui.db import (
     _db_has_ingest,
     _fetch_latest_per_node,
     _utcnow,
+    acknowledge_recommendation,
     delete_node,
     get_dump,
     hide_node,
+    restore_recommendation,
     unhide_node,
 )
 from app.brain_address import resolve_brain_address as _resolve_brain_address_info
 from app.ui.diagnostics import render_diagnostics_page
 from app.ui.api_docs import render_api_docs_page
-from app.ui.fleet import render_fleet_page
+from app.ui.fleet import invalidate_view_cache, render_fleet_page
 from app.ui.inventory import _inventory_md, build_inventory_rows, render_inventory_page
 from app.ui.node import render_node_detail
 from app.node_metadata import resolve_node_reference
@@ -1054,6 +1056,7 @@ def api_docs(request: Request) -> HTMLResponse:
 def node_hide(request: Request, node: str) -> RedirectResponse:
     next_url = (request.query_params.get("next") or "/").strip() or "/"
     hide_node(resolve_node_reference(node.strip()))
+    invalidate_view_cache()
     return RedirectResponse(url=next_url, status_code=303)
 
 
@@ -1061,6 +1064,7 @@ def node_hide(request: Request, node: str) -> RedirectResponse:
 def node_unhide(request: Request, node: str) -> RedirectResponse:
     next_url = (request.query_params.get("next") or "/").strip() or "/"
     unhide_node(resolve_node_reference(node.strip()))
+    invalidate_view_cache()
     return RedirectResponse(url=next_url, status_code=303)
 
 
@@ -1068,6 +1072,27 @@ def node_unhide(request: Request, node: str) -> RedirectResponse:
 def node_delete(request: Request, node: str) -> RedirectResponse:
     next_url = (request.query_params.get("next") or "/").strip() or "/"
     delete_node(resolve_node_reference(node.strip()))
+    invalidate_view_cache()
+    return RedirectResponse(url=next_url, status_code=303)
+
+
+@router.post("/node/{node}/ack")
+def node_acknowledge_warning(request: Request, node: str) -> RedirectResponse:
+    next_url = (request.query_params.get("next") or "/").strip() or "/"
+    key = (request.query_params.get("key") or "").strip()
+    if key:
+        acknowledge_recommendation(resolve_node_reference(node.strip()), key)
+        invalidate_view_cache()
+    return RedirectResponse(url=next_url, status_code=303)
+
+
+@router.post("/node/{node}/restore")
+def node_restore_warning(request: Request, node: str) -> RedirectResponse:
+    next_url = (request.query_params.get("next") or "/").strip() or "/"
+    key = (request.query_params.get("key") or "").strip()
+    if key:
+        restore_recommendation(resolve_node_reference(node.strip()), key)
+        invalidate_view_cache()
     return RedirectResponse(url=next_url, status_code=303)
 
 
