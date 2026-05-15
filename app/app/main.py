@@ -34,6 +34,7 @@ from app.versions import (
     SCHEMA_BEHIND_WARN_MIN,
     SCHEMA_BEHIND_CRIT_MIN,
 )
+from app.ui.fleet import _agent_update_info
 
 PKG_DIR = Path(__file__).resolve().parent
 
@@ -632,6 +633,7 @@ def _fetch_latest_payloads(limit_nodes: int = 200) -> List[Dict[str, Any]]:
 def _node_summary(payload: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
     facts = payload.get("facts") if isinstance(payload.get("facts"), dict) else {}
     metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+    update_info = _agent_update_info(payload, agent_version=display_agent_version(payload.get("agent_version") or "unknown"))
 
     try:
         h = compute_health(payload, ctx=ctx)
@@ -658,6 +660,11 @@ def _node_summary(payload: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any
         "node": payload.get("node", "unknown"),
         "last_seen": payload.get("ts", "unknown"),
         "agent_version": display_agent_version(payload.get("agent_version") or "unknown"),
+        "update_mode": update_info.get("update_mode"),
+        "self_update_enabled": update_info.get("self_update_enabled"),
+        "update_status": update_info.get("update_status"),
+        "update_display": update_info.get("update_display"),
+        "update_tone": update_info.get("update_tone"),
         "schema_version": payload.get("schema_version") or payload.get("schema") or "unknown",
         "agent_status": _agent_status_view(payload),
         "health": h.get("state", "unknown"),

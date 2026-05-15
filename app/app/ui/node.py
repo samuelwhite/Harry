@@ -9,7 +9,7 @@ from app.machine_summary import get_machine_summary
 from app.node_metadata import node_display_name, node_meta_summary, node_route_id, prime_privacy_aliases
 from app.node_metadata import privacy_mode_enabled
 from app.versions import AGENT_VERSION, BRAIN_VERSION
-from app.ui.fleet import _advice_ack_state, _advice_normalised_snapshot, _render_recommendations_panel
+from app.ui.fleet import _advice_ack_state, _advice_normalised_snapshot, _agent_update_info, _render_recommendations_panel, _render_update_badge
 
 from .db import get_latest_node_record, get_latest_node_records, _load_schema_current, _raw_payload
 from .templates import _html_escape, render_shell
@@ -87,6 +87,7 @@ def render_node_detail(node: str, hours: int) -> str:
     advice = _advice_normalised_snapshot(payload)
     active_advice, acknowledged_advice = _advice_ack_state(node, advice)
     advice = active_advice + acknowledged_advice
+    update_info = _agent_update_info(payload)
 
     pretty_payload_text = json.dumps(payload, indent=2, ensure_ascii=False)
     pretty_raw_text = json.dumps(raw, indent=2, ensure_ascii=False) if raw else ""
@@ -110,6 +111,50 @@ def render_node_detail(node: str, hours: int) -> str:
 
   <div class="panel">
     <div class="subtitle" style="margin:0;">{_html_escape(str(summary.get("summary") or ""))}</div>
+  </div>
+</div>
+"""
+
+    update_mode = _html_escape(str(update_info.get("update_mode") or "unknown"))
+    update_display = _html_escape(str(update_info.get("update_display") or "Update mode unknown"))
+    update_tone = str(update_info.get("update_tone") or "info")
+    self_update_text = "enabled" if update_info.get("self_update_enabled") else "disabled" if update_info.get("self_update_enabled") is False else "unknown"
+    last_update_bits: List[str] = []
+    if update_info.get("last_update_result"):
+        last_update_bits.append(_html_escape(str(update_info.get("last_update_result"))))
+    if update_info.get("last_update_reason"):
+        last_update_bits.append(_html_escape(str(update_info.get("last_update_reason"))))
+    last_update_html = ""
+    if last_update_bits:
+        last_update_html = (
+            '<div class="advrow"><div class="advleft">'
+            '<div class="advnode">Last update</div>'
+            f'<div class="advmsg">{" · ".join(last_update_bits)}</div>'
+            '</div></div>'
+        )
+
+    update_html = f"""
+<div class="section" id="agent-update">
+  <div class="sectionhead">
+    <div>
+      <div class="h2">Agent update mode</div>
+      <div class="h2sub">Operational metadata only. This does not affect node health.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="advwrap">
+      <div class="advrow">
+        <div class="advleft">
+          <div class="advnode">{update_display}</div>
+          <div class="advmsg">Mode: {update_mode} · Self-update: {_html_escape(self_update_text)}</div>
+        </div>
+        <div class="advright">
+          {_render_update_badge(update_tone, str(update_info.get("update_display") or "Update mode unknown"))}
+        </div>
+      </div>
+      {last_update_html}
+    </div>
   </div>
 </div>
 """
@@ -148,6 +193,8 @@ def render_node_detail(node: str, hours: int) -> str:
 
     content = f"""
 {summary_html}
+
+{update_html}
 
 {advice_html}
 

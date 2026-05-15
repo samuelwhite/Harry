@@ -167,6 +167,41 @@ def test_inventory_page_renders_node_recommendations(monkeypatch):
     assert "node-recommendations" not in html
 
 
+def test_inventory_page_renders_agent_update_mode(monkeypatch):
+    @contextmanager
+    def fake_db():
+        yield object()
+
+    latest = {
+        "nas-1": {
+            "ts": "2026-05-10T12:00:00Z",
+            "payload": {
+                "agent_version": "0.2.4",
+                "capabilities": {
+                    "synology_dsm": True,
+                    "self_update_enabled": False,
+                    "update_mode": "manual",
+                },
+                "facts": {
+                    "disks": [{"name": "Disk 1", "type": "NVMe", "size_gb": 512}],
+                },
+                "metrics": {"disk_used": [], "temps_c": {}, "gpu": [], "extensions": {}},
+                "derived": {"health": {"state": "healthy", "worst_severity": "ok", "reasons": []}, "extensions": {}},
+                "advice": [],
+            },
+        }
+    }
+
+    monkeypatch.setattr(inventory_ui, "_db", fake_db)
+    monkeypatch.setattr(inventory_ui, "_db_has_ingest", lambda conn: True)
+    monkeypatch.setattr(inventory_ui, "_fetch_latest_per_node", lambda conn: latest)
+
+    html = inventory_ui.render_inventory_page(hours=24, debug=False)
+
+    assert "Manual update available" in html
+    assert "Self-update" not in html
+
+
 def test_fleet_storage_panel_renders_synology_volume_mounts():
     html = fleet_ui._render_storage_physical(
         [],

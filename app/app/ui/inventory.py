@@ -6,7 +6,7 @@ from app.node_metadata import node_display_name, node_meta_summary, node_route_i
 from app.versions import AGENT_VERSION, BRAIN_VERSION, display_agent_version
 from app.units import format_capacity_gb
 from app.ui.capabilities import gpu_state_message, gpu_capability_hint
-from app.ui.fleet import _advice_ack_state, _advice_normalised_snapshot, _render_recommendations_panel
+from app.ui.fleet import _advice_ack_state, _advice_normalised_snapshot, _agent_update_info, _render_recommendations_panel, _render_update_badge
 
 from .db import (
     _db,
@@ -168,6 +168,7 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
     nics = _get_network_interfaces(payload)
     display_name = node_display_name(node)
     meta = node_meta_summary(node)
+    update_info = _agent_update_info(payload, agent_version=agent_version)
 
     def clean_list(xs: List[Any], keys: List[str]) -> List[Dict[str, Any]]:
         out = []
@@ -184,6 +185,11 @@ def _inventory_row(node: str, payload: Dict[str, Any], ts: str) -> Dict[str, Any
         "meta": meta,
         "last_seen": ts,
         "agent_version": agent_version,
+        "update_mode": update_info.get("update_mode"),
+        "update_status": update_info.get("update_status"),
+        "update_display": update_info.get("update_display"),
+        "update_tone": update_info.get("update_tone"),
+        "self_update_enabled": update_info.get("self_update_enabled"),
         "model": model,
         "cpu": cpu,
         "bios_version": bios,
@@ -386,6 +392,8 @@ def render_inventory_page(hours: int, debug: bool) -> str:
         bios = r.get("bios_version") or "—"
         last_seen = r.get("last_seen") or "—"
         agent = display_agent_version(r.get("agent_version") or "unknown")
+        update_display = r.get("update_display") or "Update mode unknown"
+        update_tone = r.get("update_tone") or "info"
         disks = r.get("disks") or []
         gpus = r.get("gpus") or []
         nics = r.get("network_interfaces") or []
@@ -433,7 +441,7 @@ def render_inventory_page(hours: int, debug: bool) -> str:
     <div class="kv"><div class="k">RAM</div><div class="v">{ram}</div></div>
     <div class="kv"><div class="k">BIOS</div><div class="v">{bios}</div></div>
     <div class="kv"><div class="k">BIOS Date</div><div class="v">{r.get('bios_release_date') or '—'}</div></div>
-    <div class="kv"><div class="k">Agent</div><div class="v">{agent}</div></div>
+    <div class="kv"><div class="k">Agent</div><div class="v">{agent}</div><div style="margin-top:8px;">{_render_update_badge(update_tone, update_display)}</div></div>
     <div class="kv"><div class="k">Last Seen</div><div class="v">{last_seen}</div></div>
   </div>
 

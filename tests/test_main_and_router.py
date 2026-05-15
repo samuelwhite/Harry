@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+from datetime import datetime, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -26,6 +28,15 @@ def _setup_temp_db(monkeypatch, tmp_path):
     monkeypatch.setattr(dbmod, "DB_PATH", str(db_path), raising=False)
     main._init_db()
     return db_path
+
+
+def _insert_snapshot(db_path, payload):
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO ingest(ts, node, payload) VALUES(?, ?, ?)",
+            (payload["ts"], payload["node"], json.dumps(payload)),
+        )
+        conn.commit()
 
 
 def _render_downloads(monkeypatch, tmp_path, *, base_url=None, headers=None):
@@ -66,6 +77,44 @@ def _make_starlette_request(host: str = "localhost", scheme: str = "http") -> Re
             "extensions": {},
         }
     )
+
+
+def _sample_snapshot(*, node: str = "nas-1") -> dict:
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return {
+        "schema_version": "0.2.3",
+        "node": node,
+        "ts": now,
+        "facts": {"cpu_cores": 4},
+        "metrics": {
+            "cpu_load_1m": 0.6,
+            "mem_used_pct": 25.0,
+            "disk_used": [
+                {
+                    "mount": "/volume1",
+                    "fs": "/dev/vg1/volume_1",
+                    "device": "/dev/vg1/volume_1",
+                    "total_b": 1000000000,
+                    "used_b": 880000000,
+                    "free_b": 120000000,
+                    "used_pct": 88.0,
+                }
+            ],
+            "temps_c": {},
+            "gpu": [],
+            "extensions": {},
+        },
+        "derived": {"health": {"state": "healthy", "worst_severity": "ok", "reasons": []}, "extensions": {}},
+        "advice": [
+            {
+                "id": "disk_warn_now",
+                "category": "storage",
+                "severity": "warn",
+                "message": "Storage is getting tight (88%).",
+                "recommendation": "Plan a cleanup or storage upgrade soon.",
+            }
+        ],
+    }
 
 
 def test_validate_dist_agent_rejects_tabs(tmp_path):
@@ -127,6 +176,29 @@ def test_node_summary_strips_platform_suffix_from_agent_version():
     assert summary["agent_version"] == "0.2.5"
 
 
+def test_node_summary_includes_agent_update_mode():
+    payload = {
+        "node": "nas-1",
+        "ts": "2026-05-07T12:00:00Z",
+        "agent_version": "0.2.4",
+        "capabilities": {
+            "synology_dsm": True,
+            "self_update_enabled": False,
+            "update_mode": "manual",
+        },
+        "facts": {},
+        "metrics": {"disk_used": [], "temps_c": {}, "gpu": [], "extensions": {}},
+        "derived": {"health": {"state": "healthy", "worst_severity": "ok", "reasons": []}, "extensions": {}},
+        "advice": [],
+    }
+
+    summary = main._node_summary(payload, ctx={})
+
+    assert summary["update_mode"] == "manual"
+    assert summary["self_update_enabled"] is False
+    assert summary["update_display"] == "Manual update available"
+
+
 def test_fleet_page_does_not_inject_full_page_refresh_script(monkeypatch):
     fleet = importlib.import_module("app.ui.fleet")
     monkeypatch.setattr(fleet, "render_fleet_live", lambda hours, debug: "<div id='fleet-live'></div>")
@@ -134,6 +206,41 @@ def test_fleet_page_does_not_inject_full_page_refresh_script(monkeypatch):
 
     assert "/fleet/partial" not in fleet_html
     assert "refreshFleet" not in fleet_html
+
+
+def test_overview_shows_manual_update_available_without_making_node_unhealthy(monkeypatch, tmp_path):
+    db_path = _setup_temp_db(monkeypatch, tmp_path)
+    payload = _sample_snapshot(node="nas-1")
+    payload["agent_version"] = "0.2.4"
+    payload["capabilities"] = {
+        "synology_dsm": True,
+        "self_update_enabled": False,
+        "update_mode": "manual",
+    }
+    _insert_snapshot(db_path, payload)
+
+    with TestClient(main.app) as client:
+        html = client.get("/").text
+
+    assert "Manual update available" in html
+    assert 'class="dot bad"' not in html
+    assert "ADVICE · BAD" not in html
+
+
+def test_overview_shows_awaiting_automatic_update_for_auto_nodes(monkeypatch, tmp_path):
+    db_path = _setup_temp_db(monkeypatch, tmp_path)
+    payload = _sample_snapshot(node="node-1")
+    payload["agent_version"] = "0.2.4"
+    payload["capabilities"] = {
+        "self_update_enabled": True,
+        "update_mode": "auto",
+    }
+    _insert_snapshot(db_path, payload)
+
+    with TestClient(main.app) as client:
+        html = client.get("/").text
+
+    assert "Awaiting automatic update" in html
 
 
 def test_discover_endpoint_reports_brain_identity(monkeypatch, tmp_path):

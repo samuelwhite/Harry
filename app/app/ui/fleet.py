@@ -1231,6 +1231,132 @@ def _agent_version_state(actual: str, expected: str) -> str:
     return "behind"
 
 
+def _coerce_boolish(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    text = _safe_str(value).strip().lower()
+    if text in ("1", "true", "yes", "on", "enabled"):
+        return True
+    if text in ("0", "false", "no", "off", "disabled"):
+        return False
+    return None
+
+
+def _agent_update_info(payload: Dict[str, Any], *, agent_version: Optional[str] = None) -> Dict[str, Any]:
+    capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), dict) else {}
+    agent_status = payload.get("agent_status") if isinstance(payload.get("agent_status"), dict) else {}
+    version = agent_version or _safe_str(payload.get("agent_version") or "unknown")
+    version_state = _agent_version_state(version, AGENT_VERSION)
+
+    update_mode = _safe_str(
+        capabilities.get("update_mode")
+        or payload.get("update_mode")
+        or ""
+    ).strip().lower()
+    self_update_enabled = _coerce_boolish(capabilities.get("self_update_enabled"))
+
+    if update_mode not in ("auto", "manual", "unknown"):
+        if self_update_enabled is True:
+            update_mode = "auto"
+        elif self_update_enabled is False:
+            update_mode = "manual"
+        else:
+            update_mode = "unknown"
+
+    if self_update_enabled is None:
+        if update_mode == "auto":
+            self_update_enabled = True
+        elif update_mode == "manual":
+            self_update_enabled = False
+
+    last_update_attempt = _safe_str(
+        agent_status.get("last_update_attempt")
+        or agent_status.get("last_update_at")
+        or capabilities.get("last_update_attempt")
+        or capabilities.get("last_update_at")
+        or ""
+    ).strip()
+    last_update_result = _safe_str(
+        agent_status.get("last_update_result")
+        or capabilities.get("last_update_result")
+        or ""
+    ).strip().lower()
+    last_update_reason = _safe_str(
+        agent_status.get("last_update_reason")
+        or capabilities.get("last_update_reason")
+        or ""
+    ).strip()
+
+    if last_update_result in ("failed", "error", "update_failed", "self_update_failed"):
+        return {
+            "self_update_enabled": self_update_enabled,
+            "update_mode": update_mode,
+            "update_status": "update failed",
+            "update_display": "Update failed",
+            "update_tone": "bad",
+            "last_update_attempt": last_update_attempt or None,
+            "last_update_result": "failed",
+            "last_update_reason": last_update_reason or None,
+        }
+
+    if update_mode == "manual":
+        if version_state == "behind":
+            return {
+                "self_update_enabled": self_update_enabled,
+                "update_mode": update_mode,
+                "update_status": "update available",
+                "update_display": "Manual update available",
+                "update_tone": "warn",
+                "last_update_attempt": last_update_attempt or None,
+                "last_update_result": last_update_result or None,
+                "last_update_reason": last_update_reason or None,
+            }
+        return {
+            "self_update_enabled": self_update_enabled,
+            "update_mode": update_mode,
+            "update_status": "manual updates",
+            "update_display": "Manual updates",
+            "update_tone": "info",
+            "last_update_attempt": last_update_attempt or None,
+            "last_update_result": last_update_result or None,
+            "last_update_reason": last_update_reason or None,
+        }
+
+    if update_mode == "auto":
+        if version_state == "behind":
+            return {
+                "self_update_enabled": self_update_enabled,
+                "update_mode": update_mode,
+                "update_status": "update available",
+                "update_display": "Awaiting automatic update",
+                "update_tone": "info",
+                "last_update_attempt": last_update_attempt or None,
+                "last_update_result": last_update_result or None,
+                "last_update_reason": last_update_reason or None,
+            }
+        return {
+            "self_update_enabled": self_update_enabled,
+            "update_mode": update_mode,
+            "update_status": "auto-updating",
+            "update_display": "Auto-updating",
+            "update_tone": "ok",
+            "last_update_attempt": last_update_attempt or None,
+            "last_update_result": last_update_result or None,
+            "last_update_reason": last_update_reason or None,
+        }
+
+    return {
+        "self_update_enabled": self_update_enabled,
+        "update_mode": "unknown",
+        "update_status": "unknown",
+        "update_display": "Update mode unknown",
+        "update_tone": "info",
+        "last_update_attempt": last_update_attempt or None,
+        "last_update_result": last_update_result or None,
+        "last_update_reason": last_update_reason or None,
+    }
+
+
 def _node_action_url(node: str, action: str, next_url: str, *, key: Optional[str] = None) -> str:
     url = f"/node/{quote(node_route_id(node), safe='')}/{action}?next={quote(next_url, safe='')}"
     if key:
@@ -1247,6 +1373,14 @@ def _action_form(url: str, label: str, confirm_text: Optional[str] = None) -> st
     )
 
 
+def _render_update_badge(update_tone: str, update_display: str, *, compact: bool = True) -> str:
+    tone = (update_tone or "info").lower()
+    badge = _badge_text(tone if tone in ("ok", "info", "warn", "bad", "stale") else "info", update_display)
+    if compact:
+        return badge
+    return f"<div class='activityheadmeta'>{badge}</div>"
+
+
 @dataclass
 class NodeView:
     node: str
@@ -1255,6 +1389,14 @@ class NodeView:
     cpu: str
     bios: str
     agent_version: str
+    update_mode: str
+    self_update_enabled: Optional[bool]
+    update_status: str
+    update_display: str
+    update_tone: str
+    last_update_attempt: Optional[str]
+    last_update_result: Optional[str]
+    last_update_reason: Optional[str]
     ram_total: str
     capabilities: Dict[str, Any]
     logical_cores: Optional[int]
@@ -1331,6 +1473,7 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
     cpu = _safe_str(raw_facts.get("cpu") or facts.get("cpu") or "")
     bios = _bios_display(facts, raw_facts)
     agent_version = display_agent_version(_safe_str(payload.get("agent_version") or "unknown"))
+    update_info = _agent_update_info(payload, agent_version=agent_version)
 
     ram_total = _ram_total_display(facts, raw_facts)
     ram_used_pct = _get_ram_used_pct(metrics, raw_metrics)
@@ -1440,6 +1583,14 @@ def build_node_view(conn, node: str, rec: Dict[str, Any], hours: int = 72) -> No
         cpu=cpu,
         bios=bios,
         agent_version=agent_version,
+        update_mode=str(update_info.get("update_mode") or "unknown"),
+        self_update_enabled=update_info.get("self_update_enabled"),
+        update_status=str(update_info.get("update_status") or "unknown"),
+        update_display=str(update_info.get("update_display") or "Update mode unknown"),
+        update_tone=str(update_info.get("update_tone") or "info"),
+        last_update_attempt=update_info.get("last_update_attempt"),
+        last_update_result=update_info.get("last_update_result"),
+        last_update_reason=update_info.get("last_update_reason"),
         ram_total=ram_total,
         capabilities=capabilities,
         logical_cores=logical_cores,
@@ -2205,6 +2356,15 @@ def _render_single_node_overview(nv: NodeView, hours: int) -> str:
           <div class="advmsg">Health: {_html_escape(nv.health_state)} · Last heartbeat {_html_escape(_ago(nv.ts))}</div>
         </div>
       </div>
+      <div class="advrow">
+        <div class="advleft">
+          <div class="advnode">Update mode</div>
+          <div class="advmsg">{_html_escape(getattr(nv, "update_display", "Update mode unknown"))}</div>
+        </div>
+        <div class="advright">
+          {_render_update_badge(getattr(nv, "update_tone", "info"), getattr(nv, "update_display", "Update mode unknown"))}
+        </div>
+      </div>
       {_render_reasoning_details(nv, open_details=True)}
       <div class="advrow">
         <div class="advleft">
@@ -2310,6 +2470,9 @@ def _render_node_card(nv: NodeView, hours: int, debug: bool) -> str:
       </div>
       <div class="nodever {agent_state}">
         Agent {_html_escape(display_agent_version(nv.agent_version))}{' · behind' if agent_state == 'behind' else ''}
+      </div>
+      <div class="activityheadmeta" style="margin-top:6px;">
+        {_render_update_badge(nv.update_tone, nv.update_display)}
       </div>
       <div class="subtitle">{_html_escape(nv.headline)}</div>
       {f'<div class="muted" style="margin-top:6px; font-size:12px;">{_html_escape(meta)}</div>' if meta else ''}

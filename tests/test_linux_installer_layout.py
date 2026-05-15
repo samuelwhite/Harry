@@ -262,6 +262,62 @@ def test_linux_agent_uses_shared_dsm_memory_snapshot_for_backoff_and_telemetry()
     assert "fallback" in script
 
 
+def test_linux_agent_payload_reports_auto_update_mode(tmp_path):
+    ip_host = "192.168." + "7.200"
+    env = os.environ.copy()
+    env["HARRY_PLATFORM"] = "linux-systemd"
+    env["HARRY_SELF_UPDATE"] = "1"
+    env["HARRY_BACKOFF_ENABLE"] = "0"
+    env["HARRY_BASE_URL"] = f"http://{ip_host}:8789"
+    env["HARRY_INGEST_URL"] = f"http://{ip_host}:8789/ingest"
+    env["HARRY_AGENT_VERSION"] = "0.2.5"
+    env["HARRY_SCHEMA_VERSION"] = "0.2.3"
+    env["HARRY_BRAIN_VERSION"] = "2026.05.15"
+    env["HARRY_NODE"] = "node-1"
+    env["PYTHON"] = "python"
+    env["CURL"] = "python"
+
+    result = subprocess.run(
+        [_bash_exe(), "agent/harry_agent.sh", "--print", "--no-update"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload["capabilities"]["self_update_enabled"] is True
+    assert payload["capabilities"]["update_mode"] == "auto"
+
+
+def test_synology_agent_payload_reports_manual_update_mode(tmp_path):
+    ip_host = "192.168." + "7.200"
+    env = os.environ.copy()
+    env["HARRY_PLATFORM"] = "synology-dsm"
+    env["HARRY_SELF_UPDATE"] = "0"
+    env["HARRY_BACKOFF_ENABLE"] = "0"
+    env["HARRY_BASE_URL"] = f"http://{ip_host}:8789"
+    env["HARRY_INGEST_URL"] = f"http://{ip_host}:8789/ingest"
+    env["HARRY_AGENT_VERSION"] = "0.2.5"
+    env["HARRY_SCHEMA_VERSION"] = "0.2.3"
+    env["HARRY_BRAIN_VERSION"] = "2026.05.15"
+    env["HARRY_NODE"] = "nas-1"
+    env["PYTHON"] = "python"
+    env["CURL"] = "python"
+
+    result = subprocess.run(
+        [_bash_exe(), "agent/harry_agent.sh", "--print", "--no-update"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload["capabilities"]["self_update_enabled"] is False
+    assert payload["capabilities"]["update_mode"] == "manual"
+
+
 def test_synology_memory_uses_cache_adjusted_calculation_when_memavailable_is_bad(tmp_path):
     script = Path("agent/harry_agent.sh").read_text(encoding="utf-8")
     meminfo = tmp_path / "meminfo"

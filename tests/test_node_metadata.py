@@ -329,3 +329,72 @@ def test_node_detail_stays_calm_when_no_recommendations_exist(monkeypatch):
     html = node_ui.render_node_detail("node-1", hours=72)
 
     assert 'id="node-recommendations"' not in html
+
+
+def test_node_detail_renders_synology_manual_update_mode(monkeypatch):
+    monkeypatch.setattr(node_ui, "get_machine_summary", lambda payload: None)
+    monkeypatch.setattr(node_ui, "get_latest_node_records", lambda: {"nas-1": {"ts": "2026-05-07T12:00:00Z", "payload": {}}})
+    monkeypatch.setattr(
+        node_ui,
+        "get_latest_node_record",
+        lambda node: {
+            "ts": "2026-05-07T12:00:00Z",
+            "payload": """
+            {
+              "node": "nas-1",
+              "ts": "2026-05-07T12:00:00Z",
+              "agent_version": "0.2.4",
+              "capabilities": {
+                "synology_dsm": true,
+                "self_update_enabled": false,
+                "update_mode": "manual"
+              },
+              "facts": {},
+              "metrics": {"disk_used": [], "temps_c": {}, "gpu": [], "extensions": {}},
+              "derived": {"health": {"state": "healthy", "worst_severity": "ok", "reasons": []}, "extensions": {}},
+              "advice": []
+            }
+            """,
+        },
+    )
+
+    html = node_ui.render_node_detail("nas-1", hours=72)
+
+    assert "Agent update mode" in html
+    assert "Manual update available" in html
+    assert "Mode: manual" in html
+    assert "Self-update: disabled" in html
+
+
+def test_node_detail_renders_linux_auto_update_mode(monkeypatch):
+    monkeypatch.setattr(node_ui, "get_machine_summary", lambda payload: None)
+    monkeypatch.setattr(node_ui, "get_latest_node_records", lambda: {"node-1": {"ts": "2026-05-07T12:00:00Z", "payload": {}}})
+    monkeypatch.setattr(
+        node_ui,
+        "get_latest_node_record",
+        lambda node: {
+            "ts": "2026-05-07T12:00:00Z",
+            "payload": """
+            {
+              "node": "node-1",
+              "ts": "2026-05-07T12:00:00Z",
+              "agent_version": "0.2.4",
+              "capabilities": {
+                "self_update_enabled": true,
+                "update_mode": "auto"
+              },
+              "facts": {},
+              "metrics": {"disk_used": [], "temps_c": {}, "gpu": [], "extensions": {}},
+              "derived": {"health": {"state": "healthy", "worst_severity": "ok", "reasons": []}, "extensions": {}},
+              "advice": []
+            }
+            """,
+        },
+    )
+
+    html = node_ui.render_node_detail("node-1", hours=72)
+
+    assert "Agent update mode" in html
+    assert "Awaiting automatic update" in html
+    assert "Mode: auto" in html
+    assert "Self-update: enabled" in html

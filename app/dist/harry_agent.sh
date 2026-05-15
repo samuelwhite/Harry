@@ -360,6 +360,46 @@ with open(p, "r", encoding="utf-8") as fh:
 PY
 }
 
+status_mark_update() {
+  [ "${PRINT_ONLY:-0}" = "1" ] && return 0
+
+  local update_result="${1:-unknown}"
+  local update_reason="${2:-}"
+
+  STATUS_FILE="$STATUS_FILE" STATUS_UPDATE_RESULT="$update_result" STATUS_UPDATE_REASON="$update_reason" "$PYTHON" - <<'PY'
+import json, os, tempfile
+from datetime import datetime, timezone
+
+path = os.environ["STATUS_FILE"]
+update_result = os.environ.get("STATUS_UPDATE_RESULT") or "unknown"
+update_reason = os.environ.get("STATUS_UPDATE_REASON") or ""
+now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+data = {}
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+        if isinstance(raw, dict):
+            data = raw
+except Exception:
+    data = {}
+
+data["last_update_at"] = now
+data["last_update_result"] = update_result[:40]
+data["last_update_reason"] = update_reason[:120] or None
+
+fd, tmp = tempfile.mkstemp(
+    prefix="harry-agent-status-",
+    suffix=".json",
+    dir=(os.path.dirname(path) or "."),
+)
+os.close(fd)
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, separators=(",", ":"), ensure_ascii=False)
+os.replace(tmp, path)
+PY
+}
+
 version_is_newer() {
   local candidate="${1:-}"
   local current="${2:-}"
@@ -379,6 +419,7 @@ version_is_newer() {
 # -----------------------------------------------------------------------------
 self_update() {
   if [ "$SELF_UPDATE" = "0" ] || [ "$NO_UPDATE" = "1" ] || [ "${HARRY_SKIP_SELF_UPDATE:-0}" = "1" ]; then
+    status_mark_update "disabled" "self_update_disabled"
     return 0
   fi
 
@@ -396,12 +437,14 @@ self_update() {
 
   if ! "$CURL" -fsSL "$DIST_URL" -o "$tmp" >/dev/null 2>&1; then
     rm -f "$tmp" >/dev/null 2>&1 || true
+    status_mark_update "failed" "download_failed"
     log_fail "self_update_failed node=${HARRY_NODE} reason=download_failed dist_url=${DIST_URL}"
     return 0
   fi
 
   if [ ! -s "$tmp" ]; then
     rm -f "$tmp" >/dev/null 2>&1 || true
+    status_mark_update "failed" "empty_candidate"
     log_fail "self_update_failed node=${HARRY_NODE} reason=empty_candidate dist_url=${DIST_URL}"
     return 0
   fi
@@ -410,6 +453,7 @@ self_update() {
 
   if ! bash -n "$tmp" >/dev/null 2>&1; then
     rm -f "$tmp" >/dev/null 2>&1 || true
+    status_mark_update "failed" "bash_syntax_invalid"
     log_fail "self_update_failed node=${HARRY_NODE} reason=bash_syntax_invalid dist_url=${DIST_URL}"
     return 0
   fi
@@ -418,12 +462,14 @@ self_update() {
   tmp_payload="$(mktemp /tmp/harry_agent_payload.XXXXXX.json)"
   if ! bash "$tmp" --print --no-update >"$tmp_payload" 2>/dev/null; then
     rm -f "$tmp" "$tmp_payload" >/dev/null 2>&1 || true
+    status_mark_update "failed" "candidate_print_check_failed"
     log_fail "self_update_failed node=${HARRY_NODE} reason=candidate_print_check_failed dist_url=${DIST_URL}"
     return 0
   fi
 
   if [ ! -s "$tmp_payload" ] || ! json_is_valid_file "$tmp_payload"; then
     rm -f "$tmp" "$tmp_payload" >/dev/null 2>&1 || true
+    status_mark_update "failed" "candidate_invalid_json"
     log_fail "self_update_failed node=${HARRY_NODE} reason=candidate_invalid_json dist_url=${DIST_URL}"
     return 0
   fi
@@ -439,6 +485,7 @@ PY
 
   if [ -n "$candidate_version" ] && ! version_is_newer "$candidate_version" "$AGENT_VERSION"; then
     rm -f "$tmp" "$tmp_payload" >/dev/null 2>&1 || true
+    status_mark_update "skipped" "candidate_not_newer"
     log_fail "self_update_skipped node=${HARRY_NODE} reason=candidate_not_newer current=${AGENT_VERSION} candidate=${candidate_version} dist_url=${DIST_URL}"
     return 0
   fi
@@ -447,6 +494,7 @@ PY
 
   if cmp -s "$tmp" "$me" >/dev/null 2>&1; then
     rm -f "$tmp" >/dev/null 2>&1 || true
+    status_mark_update "current" "candidate_same_as_current"
     return 0
   fi
 
@@ -454,11 +502,13 @@ PY
 
   if mv -f "$tmp" "$me" >/dev/null 2>&1; then
     chmod 755 "$me" >/dev/null 2>&1 || true
+    status_mark_update "updated" "reexec"
     export HARRY_SKIP_SELF_UPDATE=1
     exec "$me" "$@"
   fi
 
   rm -f "$tmp" >/dev/null 2>&1 || true
+  status_mark_update "failed" "replace_failed"
   log_fail "self_update_failed node=${HARRY_NODE} reason=replace_failed path=${me}"
   return 0
 }
@@ -1214,6 +1264,8 @@ capabilities = {
     "synology_dsm": platform == "synology-dsm",
     "temperature": which("sensors") is not None,
     "smart": which("smartctl") is not None,
+    "self_update_enabled": str(os.environ.get("HARRY_SELF_UPDATE", "1")).strip().lower() not in ("0", "false", "no", "off", "disabled"),
+    "update_mode": "auto" if str(os.environ.get("HARRY_SELF_UPDATE", "1")).strip().lower() not in ("0", "false", "no", "off", "disabled") else "manual",
 }
 
 if which("nvidia-smi"):

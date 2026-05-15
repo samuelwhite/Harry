@@ -162,6 +162,20 @@ def test_agent_summary_separates_current_behind_and_unknown_versions():
     assert badge == "Needs attention"
 
 
+def test_agent_summary_treats_manual_update_mode_as_calm():
+    nodeviews = [
+        SimpleNamespace(agent_version="0.2.4", stale=False, update_mode="manual", update_status="update available"),
+        SimpleNamespace(agent_version="0.2.5", stale=False, update_mode="auto", update_status="auto-updating"),
+    ]
+
+    title, body, status, badge = diagnostics._agent_summary(nodeviews)
+
+    assert title == "Agents reporting?"
+    assert "manual update available" in body
+    assert status == "ok"
+    assert badge == "Healthy"
+
+
 def test_api_services_returns_service_rows(monkeypatch, tmp_path):
     _setup_temp_db(monkeypatch, tmp_path)
     monkeypatch.setenv(

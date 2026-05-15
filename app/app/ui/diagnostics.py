@@ -167,11 +167,50 @@ def _summary_status(label: str, body: str, status: str, badge: str | None = None
 def _agent_summary(nodeviews) -> tuple[str, str, str, str | None]:
     total = len(nodeviews)
     stale_n = sum(1 for n in nodeviews if n.stale)
+    update_mode_present = any(hasattr(n, "update_status") for n in nodeviews)
     current_n = sum(
         1
         for n in nodeviews
         if display_agent_version(n.agent_version) not in ("", "unknown") and display_agent_version(n.agent_version) == AGENT_VERSION
     )
+
+    if update_mode_present:
+        manual_n = sum(1 for n in nodeviews if getattr(n, "update_mode", "unknown") == "manual" and getattr(n, "update_status", "") == "update available")
+        auto_pending_n = sum(1 for n in nodeviews if getattr(n, "update_mode", "unknown") == "auto" and getattr(n, "update_status", "") == "update available")
+        failed_n = sum(1 for n in nodeviews if getattr(n, "update_status", "") == "update failed")
+        unknown_n = sum(1 for n in nodeviews if getattr(n, "update_mode", "unknown") == "unknown")
+
+        if total == 0:
+            return _summary_status("Agents reporting?", "No agents reporting yet.", "info", "Not set up yet")
+        if stale_n or failed_n:
+            body_parts = []
+            if current_n:
+                body_parts.append(f"{current_n} current")
+            if manual_n:
+                body_parts.append(f"{manual_n} manual update available")
+            if auto_pending_n:
+                body_parts.append(f"{auto_pending_n} awaiting automatic update")
+            if unknown_n:
+                body_parts.append(f"{unknown_n} unknown")
+            body = ", ".join(body_parts) if body_parts else "All agents are current."
+            if stale_n:
+                body += f", {stale_n} stale"
+            if failed_n:
+                body += f", {failed_n} update failed"
+            return _summary_status("Agents reporting?", body, "warn" if not stale_n else "bad", "Needs attention")
+
+        body_parts = []
+        if current_n:
+            body_parts.append(f"{current_n} current")
+        if manual_n:
+            body_parts.append(f"{manual_n} manual update available")
+        if auto_pending_n:
+            body_parts.append(f"{auto_pending_n} awaiting automatic update")
+        if unknown_n:
+            body_parts.append(f"{unknown_n} unknown")
+        body = ", ".join(body_parts) if body_parts else "All agents are current."
+        return _summary_status("Agents reporting?", body, "ok", "Healthy")
+
     behind_n = sum(
         1
         for n in nodeviews
@@ -273,17 +312,29 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
     )
     healthy_n = max(0, len(nodeviews) - stale_n - bad_n - warn_n)
 
-    behind = sum(
-        1
-        for n in nodeviews
-        if display_agent_version(n.agent_version) not in ("", "unknown") and display_agent_version(n.agent_version) != AGENT_VERSION
-    )
+    update_mode_present = any(hasattr(n, "update_status") for n in nodeviews)
+    if update_mode_present:
+        manual_updates = sum(1 for n in nodeviews if getattr(n, "update_mode", "unknown") == "manual" and getattr(n, "update_status", "") == "update available")
+        auto_pending = sum(1 for n in nodeviews if getattr(n, "update_mode", "unknown") == "auto" and getattr(n, "update_status", "") == "update available")
+        update_failed = sum(1 for n in nodeviews if getattr(n, "update_status", "") == "update failed")
+        unknown_update = sum(1 for n in nodeviews if getattr(n, "update_mode", "unknown") == "unknown")
+        behind = auto_pending + update_failed
+    else:
+        manual_updates = 0
+        auto_pending = 0
+        update_failed = 0
+        unknown_update = 0
+        behind = sum(
+            1
+            for n in nodeviews
+            if display_agent_version(n.agent_version) not in ("", "unknown") and display_agent_version(n.agent_version) != AGENT_VERSION
+        )
     current_n = sum(
         1
         for n in nodeviews
         if display_agent_version(n.agent_version) not in ("", "unknown") and display_agent_version(n.agent_version) == AGENT_VERSION
     )
-    unknown_n = max(0, len(nodeviews) - current_n - behind)
+    unknown_n = unknown_update if update_mode_present else max(0, len(nodeviews) - current_n - behind)
 
     delayed = sum(
         1
@@ -447,7 +498,9 @@ def render_diagnostics_page(request: Request, hours: int, debug: bool) -> str:
         <tr><td>Healthy nodes</td><td>{healthy_n}</td></tr>
         <tr><td>Stale nodes</td><td>{stale_n}</td></tr>
         <tr><td>Current agents</td><td>{current_n}</td></tr>
-        <tr><td>Behind agents</td><td>{behind}</td></tr>
+        <tr><td>Manual updates</td><td>{manual_updates}</td></tr>
+        <tr><td>Awaiting automatic update</td><td>{auto_pending}</td></tr>
+        <tr><td>Update failed</td><td>{update_failed}</td></tr>
         <tr><td>Unknown agents</td><td>{unknown_n}</td></tr>
         <tr><td>Bad findings</td><td>{bad_n}</td></tr>
         <tr><td>Warn findings</td><td>{warn_n}</td></tr>
