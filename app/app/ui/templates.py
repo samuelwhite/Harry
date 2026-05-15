@@ -593,12 +593,47 @@ input[type="button"] {
 .adviceitem {
   display: flex;
   gap: 10px;
-  align-items: baseline;
+  align-items: flex-start;
   padding: 6px 0;
   border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
 .adviceitem:last-child { border-bottom: none; }
+
+.adviceitem .msg {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.adviceaction {
+  display: flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.adviceaction .btn {
+  min-width: 10.5rem;
+  white-space: nowrap;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+@media (max-width: 640px) {
+  .adviceitem {
+    flex-wrap: wrap;
+  }
+
+  .adviceaction {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .adviceaction .btn {
+    width: 100%;
+    min-width: 0;
+  }
+}
 
 .tag {
   font-size: 12px;

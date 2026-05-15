@@ -91,10 +91,12 @@ def test_acknowledged_warning_calms_overview_and_stays_visible(monkeypatch, tmp_
         assert "Acknowledged warnings" in node_html
         assert "Restore warning" in node_html
         assert "Storage is getting tight (88%)." in node_html
+        assert 'class="adviceaction"' in node_html
 
         inventory_html = inventory_ui.render_inventory_page(hours=24, debug=False)
         assert "Recommendations" in inventory_html
         assert "Acknowledged warnings" in inventory_html
+        assert 'class="adviceaction"' in inventory_html
 
         diagnostics_html = client.get("/diagnostics").text
         assert "Acknowledged warnings" in diagnostics_html

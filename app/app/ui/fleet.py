@@ -252,7 +252,7 @@ def _render_recommendations_panel(
                 f"<div class='adviceitem'>"
                 f"<span class='tag {badge_sev}'>{_html_escape(sev)}</span>"
                 f"<span class='msg'>{_html_escape(text)}</span>"
-                f"<span style='margin-left:auto;'>{action}</span>"
+                f"{action}"
                 f"</div>"
             )
 
@@ -270,7 +270,7 @@ def _render_recommendations_panel(
                 f"<div class='adviceitem acknowledged'>"
                 f"<span class='tag ack'>acknowledged</span>"
                 f"<span class='msg'>{_html_escape(text)}</span>"
-                f"<span style='margin-left:auto;'>{action}</span>"
+                f"{action}"
                 f"</div>"
             )
 
@@ -1251,7 +1251,7 @@ def _node_action_url(node: str, action: str, next_url: str, *, key: Optional[str
 def _action_form(url: str, label: str, confirm_text: Optional[str] = None) -> str:
     confirm_attr = f' onclick="return confirm(\'{_html_escape(confirm_text)}\')"' if confirm_text else ""
     return (
-        f'<form method="post" action="{_html_escape(url)}" style="display:inline-block; margin:0 6px 6px 0;">'
+        f'<form method="post" action="{_html_escape(url)}" class="adviceaction">'
         f'<button class="btn" type="submit"{confirm_attr}>{_html_escape(label)}</button>'
         f"</form>"
     )
