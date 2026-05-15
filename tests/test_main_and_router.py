@@ -28,7 +28,7 @@ def _setup_temp_db(monkeypatch, tmp_path):
     return db_path
 
 
-def _render_downloads(monkeypatch, tmp_path, *, base_url=None):
+def _render_downloads(monkeypatch, tmp_path, *, base_url=None, headers=None):
     _setup_temp_db(monkeypatch, tmp_path)
     monkeypatch.setattr(router, "_downloads_dir", lambda: tmp_path)
 
@@ -37,7 +37,7 @@ def _render_downloads(monkeypatch, tmp_path, *, base_url=None):
         client_kwargs["base_url"] = base_url
 
     with TestClient(main.app, **client_kwargs) as client:
-        return client.get("/downloads").text
+        return client.get("/downloads", headers=headers or {}).text
 
 
 def _make_request(host: str, scheme: str = "http"):
@@ -325,6 +325,21 @@ def test_downloads_uses_harry_brain_lan_ip(monkeypatch, tmp_path):
     assert "127.0.0.1" not in html
 
 
+def test_downloads_prefers_forwarded_proxy_headers(monkeypatch, tmp_path):
+    html = _render_downloads(
+        monkeypatch,
+        tmp_path,
+        headers={
+            "host": "127.0.0.1:8789",
+            "x-forwarded-host": "brain.example",
+            "x-forwarded-proto": "https",
+        },
+    )
+
+    assert 'id="brain-url">https://brain.example<' in html
+    assert "Could not determine automatically" not in html
+
+
 def test_downloads_rejects_detected_docker_bridge_ip(monkeypatch, tmp_path):
     html = router._downloads_fallback_help_html() + router._downloads_advanced_help_html()
 
@@ -435,7 +450,7 @@ def test_downloads_uses_detected_lan_ip_with_default_public_port(monkeypatch, tm
     assert "127.0.0.1" not in html
 
 
-def test_downloads_domain_http_request_does_not_become_domain_port(monkeypatch):
+def test_downloads_domain_http_request_uses_domain_host(monkeypatch):
     monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
     monkeypatch.delenv("HARRY_PUBLIC_PORT", raising=False)
     monkeypatch.delenv("HARRY_PORT", raising=False)
@@ -444,7 +459,7 @@ def test_downloads_domain_http_request_does_not_become_domain_port(monkeypatch):
 
     public_url, _ = router._resolve_brain_urls(request)
 
-    assert public_url == "http://<brain-ip>:8789"
+    assert public_url == "http://brain.example"
 
 
 def test_downloads_https_domain_request_renders_https_domain(monkeypatch):

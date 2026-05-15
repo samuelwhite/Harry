@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import app.brain_address as brain_address
 
 
@@ -53,6 +55,45 @@ def test_resolve_brain_address_reports_rejected_candidates(monkeypatch):
 
     assert info["display_url"] == "http://192.168.1.55:8789"
     assert info["rejected_lan_candidates"] == ["192.168.240.2"]
+
+
+def test_resolve_brain_address_prefers_forwarded_proxy_headers(monkeypatch):
+    monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("HARRY_BRAIN_LAN_IP", raising=False)
+    monkeypatch.setattr(brain_address, "runtime_is_container", lambda: False)
+    monkeypatch.setattr(brain_address, "detect_lan_ip", lambda: "192.168.1.55")
+
+    request = SimpleNamespace(
+        headers={
+            "host": "127.0.0.1:8789",
+            "x-forwarded-host": "brain.example",
+            "x-forwarded-proto": "https",
+        },
+        url=SimpleNamespace(hostname="127.0.0.1", port=8789, scheme="http"),
+    )
+
+    info = brain_address.resolve_brain_address(request)
+
+    assert info["display_url"] == "https://brain.example"
+    assert info["source"] == "request-forwarded"
+    assert info["request_forwarded_candidate"] == "https://brain.example"
+
+
+def test_resolve_brain_address_accepts_lan_ip_candidate(monkeypatch):
+    monkeypatch.delenv("HARRY_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("HARRY_BRAIN_LAN_IP", raising=False)
+    monkeypatch.setattr(brain_address, "runtime_is_container", lambda: False)
+    monkeypatch.setattr(brain_address, "detect_lan_ip", lambda: "192.168.1.55")
+
+    request = SimpleNamespace(
+        headers={"host": "127.0.0.1:8789"},
+        url=SimpleNamespace(hostname="127.0.0.1", port=8789, scheme="http"),
+    )
+
+    info = brain_address.resolve_brain_address(request)
+
+    assert info["display_url"] == "http://192.168.1.55:8789"
+    assert info["source"] == "lan-detected"
 
 
 def test_discovery_methods_enabled_reflects_container_mode(monkeypatch):

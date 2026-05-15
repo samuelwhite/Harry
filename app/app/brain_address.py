@@ -179,7 +179,102 @@ def _reject_lan_candidate(ip: str, *, container_runtime: bool = False) -> str | 
     return None
 
 
-def _request_public_candidate(request: Any | None) -> str | None:
+def _split_header_values(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    return [part.strip() for part in str(raw).split(",") if part.strip()]
+
+
+def _host_looks_like_ip(host: str) -> bool:
+    try:
+        return ipaddress.ip_address((host or "").strip()).version == 4
+    except ValueError:
+        return False
+
+
+def _candidate_from_host(host: str, scheme: str = "http", port: int | None = None) -> str | None:
+    raw = (host or "").strip()
+    if not raw or _is_placeholder_brain_address(raw):
+        return None
+
+    try:
+        parsed = urlsplit(f"//{raw}", scheme="http")
+    except Exception:
+        return None
+
+    host_only = (parsed.hostname or "").strip()
+    if not host_only or _is_placeholder_brain_address(host_only):
+        return None
+
+    scheme = (scheme or "http").strip().lower() or "http"
+    parsed_port = parsed.port if parsed.port is not None else port
+
+    if _host_looks_like_ip(host_only):
+        if not _host_is_publicly_usable(host_only):
+            return None
+        return f"{scheme}://{host_only}:{parsed_port or public_port()}"
+
+    if not _host_is_publicly_usable(host_only):
+        return None
+
+    if parsed_port is not None:
+        return f"{scheme}://{host_only}:{parsed_port}"
+    return f"{scheme}://{host_only}"
+
+
+def _request_forwarded_candidate(request: Any | None) -> str | None:
+    if request is None:
+        return None
+
+    try:
+        headers = request.headers
+    except Exception:
+        headers = None
+
+    try:
+        request_scheme = (request.url.scheme or "http").strip().lower()
+    except Exception:
+        request_scheme = "http"
+
+    forwarded = ""
+    forwarded_proto = ""
+    try:
+        forwarded = (headers.get("forwarded") or "").strip() if headers else ""
+    except Exception:
+        forwarded = ""
+    try:
+        forwarded_proto = (headers.get("x-forwarded-proto") or "").strip() if headers else ""
+    except Exception:
+        forwarded_proto = ""
+
+    if forwarded:
+        first_segment = forwarded.split(",", 1)[0]
+        host_match = re.search(r"\bhost=([^;,\s]+)", first_segment, flags=re.IGNORECASE)
+        proto_match = re.search(r"\bproto=([^;,\s]+)", first_segment, flags=re.IGNORECASE)
+        candidate = _candidate_from_host(
+            host_match.group(1) if host_match else "",
+            proto_match.group(1) if proto_match else (forwarded_proto or request_scheme),
+        )
+        if candidate:
+            return candidate
+
+    x_forwarded_host = ""
+    try:
+        x_forwarded_host = (headers.get("x-forwarded-host") or "").strip() if headers else ""
+    except Exception:
+        x_forwarded_host = ""
+
+    if x_forwarded_host:
+        scheme = forwarded_proto.split(",", 1)[0].strip().lower() if forwarded_proto else request_scheme
+        for host in _split_header_values(x_forwarded_host):
+            candidate = _candidate_from_host(host, scheme=scheme)
+            if candidate:
+                return candidate
+
+    return None
+
+
+def _request_host_candidate(request: Any | None) -> str | None:
     if request is None:
         return None
 
@@ -193,38 +288,10 @@ def _request_public_candidate(request: Any | None) -> str | None:
     except Exception:
         scheme = "http"
 
-    def _from_host(host: str) -> str | None:
-        raw = (host or "").strip()
-        if not raw or _is_placeholder_brain_address(raw):
-            return None
-
-        parsed = None
-        try:
-            parsed = urlsplit(f"//{raw}", scheme="http")
-        except Exception:
-            parsed = None
-
-        if not parsed or not parsed.hostname:
-            return None
-
-        host_only = (parsed.hostname or "").strip()
-        port = parsed.port
-
-        try:
-            addr = ipaddress.ip_address(host_only)
-        except ValueError:
-            if scheme == "https" and host_only and not _host_is_loopback(host_only):
-                return f"https://{host_only}"
-            return None
-
-        if addr.version != 4 or not _host_is_publicly_usable(host_only):
-            return None
-
-        return f"{scheme or 'http'}://{host_only}:{port or public_port()}"
-
-    candidate = _from_host(host_header)
-    if candidate:
-        return candidate
+    if host_header:
+        candidate = _candidate_from_host(host_header, scheme=scheme)
+        if candidate:
+            return candidate
 
     try:
         host = (request.url.hostname or "").strip()
@@ -238,21 +305,11 @@ def _request_public_candidate(request: Any | None) -> str | None:
         return None
 
     try:
-        addr = ipaddress.ip_address(host)
-    except ValueError:
-        if scheme == "https" and not _host_is_loopback(host):
-            return f"https://{host}"
-        return None
-
-    if addr.version != 4 or not _host_is_publicly_usable(host):
-        return None
-
-    try:
         port = request.url.port
     except Exception:
         port = None
 
-    return f"{scheme or 'http'}://{host}:{port or public_port()}"
+    return _candidate_from_host(host, scheme=scheme, port=port)
 
 
 def _score_lan_ip(ip: str) -> int:
@@ -538,7 +595,8 @@ def recommended_lan_url() -> str | None:
 def resolve_brain_address(request: Any | None = None) -> Dict[str, Any]:
     canonical = canonical_public_base_url()
     recommended = recommended_lan_url()
-    request_candidate = _request_public_candidate(request)
+    request_forwarded_candidate = _request_forwarded_candidate(request)
+    request_host_candidate = _request_host_candidate(request)
     container_runtime = runtime_is_container()
     if canonical:
         source = "canonical"
@@ -551,9 +609,16 @@ def resolve_brain_address(request: Any | None = None) -> Dict[str, Any]:
             "Harry could not determine a reliable external Brain address automatically. "
             "Set HARRY_PUBLIC_BASE_URL for the canonical address that other machines should use."
         )
-    elif not container_runtime and request_candidate:
+    elif not container_runtime and request_forwarded_candidate:
+        source = "request-forwarded"
+        display_url = request_forwarded_candidate.rstrip("/")
+        warning = (
+            "Harry is using the reverse-proxy address from the current request for now. "
+            "Set HARRY_PUBLIC_BASE_URL to make the Brain address canonical for other machines."
+        )
+    elif not container_runtime and request_host_candidate:
         source = "request-host"
-        display_url = request_candidate.rstrip("/")
+        display_url = request_host_candidate.rstrip("/")
         warning = (
             "Harry is using the current request address for now. "
             "Set HARRY_PUBLIC_BASE_URL to make the Brain address canonical for other machines."
@@ -588,6 +653,8 @@ def resolve_brain_address(request: Any | None = None) -> Dict[str, Any]:
         "local_url": f"http://127.0.0.1:{request_port or public_port()}",
         "container_runtime": container_runtime,
         "detected_lan_ip": detect_lan_ip(),
+        "request_forwarded_candidate": request_forwarded_candidate,
+        "request_host_candidate": request_host_candidate,
         "rejected_lan_candidates": [
             ip
             for ip in _gather_lan_candidates()
@@ -606,5 +673,5 @@ def discovery_methods_enabled() -> list[str]:
     if runtime_is_container():
         methods.append("manual address entry")
     else:
-        methods.extend(["request host", "LAN detection", "installer subnet discovery"])
+        methods.extend(["reverse proxy headers", "request host", "LAN detection", "installer subnet discovery"])
     return methods

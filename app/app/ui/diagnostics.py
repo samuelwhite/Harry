@@ -116,35 +116,43 @@ def _advanced_discovery_rows(request: Request) -> List[tuple[str, str, str]]:
     host = (request.headers.get("host") or request.url.hostname or "").strip()
     scheme = (request.url.scheme or "http").strip().lower()
     reverse_proxy = "No"
+    if (request.headers.get("x-forwarded-host") or request.headers.get("forwarded")):
+        reverse_proxy = "Likely"
     if host:
         try:
             addr = ipaddress.ip_address(host.split(":", 1)[0])
         except ValueError:
-            if scheme == "https":
+            if reverse_proxy != "Likely" and scheme == "https":
                 reverse_proxy = "Likely"
         else:
-            if addr.version == 4 and not addr.is_loopback and not addr.is_link_local and not addr.is_unspecified:
+            if reverse_proxy != "Likely" and addr.version == 4 and not addr.is_loopback and not addr.is_link_local and not addr.is_unspecified:
                 reverse_proxy = "No"
 
     canonical = info.get("canonical_base_url") or "Not set"
     recommended = info.get("recommended_lan_url") or "Not detected"
     display = info.get("display_url") or "Could not determine"
+    source = info.get("source") or "Unknown"
     warning = info.get("warning") or "None"
     installer = "Ready" if info.get("display_url") else "Manual input required"
     container_runtime = "Yes" if info.get("container_runtime") else "No"
     detected_lan = info.get("detected_lan_ip") or "Not detected"
+    request_forwarded = info.get("request_forwarded_candidate") or "None"
+    request_host = info.get("request_host_candidate") or "None"
     rejected = info.get("rejected_lan_candidates") or []
     rejected_txt = ", ".join(str(x) for x in rejected[:8]) if rejected else "None"
     methods = ", ".join(discovery_methods_enabled())
 
     return [
         ("Brain Address", "online", f"Other machines should use: {display}"),
+        ("Selected source", "online" if info.get("display_url") else "warning", str(source)),
         ("Canonical address", "online" if info.get("canonical_base_url") else "warning", str(canonical)),
         ("Recommended LAN", "online" if info.get("recommended_lan_url") else "warning", str(recommended)),
         ("Discovery endpoint", "online", "Installers can query /discover or /.well-known/harry-brain."),
         ("Reverse proxy", "info" if reverse_proxy == "Likely" else "online", reverse_proxy),
         ("Container networking", "warn" if info.get("container_runtime") else "online", container_runtime),
         ("Detected LAN address", "online" if info.get("detected_lan_ip") else "warning", str(detected_lan)),
+        ("Forwarded request", "online" if info.get("request_forwarded_candidate") else "warning", str(request_forwarded)),
+        ("Request host", "online" if info.get("request_host_candidate") else "warning", str(request_host)),
         ("Rejected addresses", "warning" if rejected else "online", rejected_txt),
         ("Discovery methods", "online", methods),
         ("Installer discovery", "online" if info.get("display_url") else "warning", installer),

@@ -40,6 +40,7 @@ from app.ui.fleet import invalidate_view_cache, render_fleet_page
 from app.ui.inventory import _inventory_md, build_inventory_rows, render_inventory_page
 from app.ui.node import render_node_detail
 from app.node_metadata import resolve_node_reference
+from app.units import format_bytes_human
 from app.versions import AGENT_VERSION, BRAIN_VERSION
 from app.ui.templates import render_shell
 
@@ -411,31 +412,67 @@ def _parse_authority(authority: str) -> tuple[str, int | None] | None:
 
 
 def _request_public_candidate(request: Request) -> tuple[str, str, int | None, bool] | None:
-    host_header = (request.headers.get("host") or "").strip()
-    candidate = _parse_authority(host_header)
     scheme = (request.url.scheme or "http").strip().lower()
+    host_header = (request.headers.get("host") or "").strip()
 
+    forwarded = (request.headers.get("forwarded") or "").strip()
+    if forwarded:
+        first = forwarded.split(",", 1)[0]
+        attrs: dict[str, str] = {}
+        for token in first.split(";"):
+            if "=" not in token:
+                continue
+            key, value = token.split("=", 1)
+            attrs[key.strip().lower()] = value.strip().strip('"')
+
+        forwarded_scheme = (attrs.get("proto") or scheme).strip().lower() or scheme
+        candidate = _parse_authority(attrs.get("host") or "")
+        if candidate:
+            host, port = candidate
+            if _host_is_publicly_usable(host):
+                try:
+                    ipaddress.ip_address(host)
+                except ValueError:
+                    return forwarded_scheme, host, port, True
+                return forwarded_scheme, host, port or request.url.port, False
+
+    x_forwarded_host = (request.headers.get("x-forwarded-host") or "").strip()
+    if x_forwarded_host:
+        forwarded_scheme = (request.headers.get("x-forwarded-proto") or scheme).split(",", 1)[0].strip().lower() or scheme
+        for raw_host in (part.strip() for part in x_forwarded_host.split(",") if part.strip()):
+            candidate = _parse_authority(raw_host)
+            if not candidate:
+                continue
+            host, port = candidate
+            if not _host_is_publicly_usable(host):
+                continue
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:
+                return forwarded_scheme, host, port, True
+            return forwarded_scheme, host, port or request.url.port, False
+
+    candidate = _parse_authority(host_header)
     if candidate:
         host, port = candidate
-        try:
-            ipaddress.ip_address(host)
-        except ValueError:
-            if scheme == "https" and not _host_is_loopback(host):
-                return "https", host, None, True
-        else:
-            if _host_is_publicly_usable(host):
-                return scheme or "http", host, port, False
+        if _host_is_publicly_usable(host):
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:
+                if scheme == "https" and not _host_is_loopback(host):
+                    return "https", host, None, True
+                return scheme or "http", host, port, True
+            return scheme or "http", host, port or request.url.port, False
 
     host = (request.url.hostname or "").strip()
-    if host:
+    if host and _host_is_publicly_usable(host):
         try:
             ipaddress.ip_address(host)
         except ValueError:
             if scheme == "https" and not _host_is_loopback(host):
                 return "https", host, None, True
-        else:
-            if _host_is_publicly_usable(host):
-                return scheme or "http", host, request.url.port, False
+            return scheme or "http", host, None, True
+        return scheme or "http", host, request.url.port, False
 
     return None
 
@@ -520,14 +557,7 @@ def _downloads_dir() -> Path:
 
 
 def _human_size(num_bytes: int) -> str:
-    size = float(num_bytes)
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if size < 1024.0 or unit == "TB":
-            if unit == "B":
-                return f"{int(size)} {unit}"
-            return f"{size:.1f} {unit}"
-        size /= 1024.0
-    return f"{int(num_bytes)} B"
+    return format_bytes_human(num_bytes).replace(" ", "")
 
 
 def _brain_url_warning(url: str) -> str | None:
