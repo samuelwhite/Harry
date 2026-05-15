@@ -613,10 +613,11 @@ input[type="button"] {
 }
 
 .adviceaction .btn {
-  min-width: 10.5rem;
+  min-width: 11.5rem;
   white-space: nowrap;
   padding-left: 14px;
   padding-right: 14px;
+  flex-shrink: 0;
 }
 
 @media (max-width: 640px) {

@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
+import app.advice_engine as advice_engine
 import app.config as config
 import app.main as main
 from app.ui import db as dbmod
+from app.ui import fleet as fleet_ui
 from app.ui import inventory as inventory_ui
 from app.ui import node as node_ui
 
@@ -64,6 +66,34 @@ def _sample_snapshot(*, node: str = "nas-1") -> dict:
                 "severity": "warn",
                 "message": "Storage is getting tight (88%).",
                 "recommendation": "Plan a cleanup or storage upgrade soon.",
+            }
+        ],
+    }
+
+
+def _cpu_warning_snapshot(*, node: str = "nas-1") -> dict:
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return {
+        "schema_version": "0.2.3",
+        "node": node,
+        "ts": now,
+        "facts": {"cpu_cores": 2},
+        "metrics": {
+            "cpu_load_1m": 0.8,
+            "mem_used_pct": 25.0,
+            "disk_used": [],
+            "temps_c": {},
+            "gpu": [],
+            "extensions": {},
+        },
+        "derived": {"health": {"state": "healthy", "worst_severity": "ok", "reasons": []}, "extensions": {}},
+        "advice": [
+            {
+                "id": "cpu_load_sustained",
+                "category": "cpu",
+                "severity": "warn",
+                "message": "CPU load is consistently heavy (median 3.20 on 2 cores over ~6h).",
+                "recommendation": "Consider moving workloads, scheduling batch jobs, or upgrading CPU if this is typical.",
             }
         ],
     }
@@ -143,3 +173,44 @@ def test_unknown_ack_key_does_not_break_rendering(monkeypatch, tmp_path):
     with TestClient(main.app) as client:
         assert client.get("/").status_code == 200
         assert client.get("/node/nas-1").status_code == 200
+
+
+def test_acknowledged_cpu_warning_does_not_keep_node_unhealthy(monkeypatch, tmp_path):
+    db_path = _setup_temp_db(monkeypatch, tmp_path)
+    snapshot = _cpu_warning_snapshot()
+    _insert_snapshot(db_path, snapshot)
+    monkeypatch.setattr(
+        fleet_ui,
+        "advice_build",
+        lambda snapshot: (
+            [
+                {
+                    "id": "cpu_load_sustained",
+                    "severity": "warn",
+                    "message": "CPU load is consistently heavy (median 3.20 on 2 cores over ~6h).",
+                    "recommendation": "Consider moving workloads, scheduling batch jobs, or upgrading CPU if this is typical.",
+                    "category": "cpu",
+                    "confidence": 0.65,
+                    "field": "history(metrics.cpu_load_1m)",
+                    "value": 3.2,
+                    "evidence": {"median_cpu_load_1m": 3.2, "cpu_cores": 2, "window_hours": 6},
+                }
+            ],
+            {"state": "warning", "worst_severity": "warn", "reasons": []},
+        ),
+    )
+
+    with TestClient(main.app) as client:
+        before = client.get("/").text
+        assert "CPU load is consistently heavy" in before
+
+        assert client.post("/node/nas-1/ack?key=cpu_load_sustained&next=/", follow_redirects=False).status_code == 303
+
+        after = client.get("/").text
+        assert "ADVICE · WARN" not in after
+        assert "ADVICE · ACKED 1" in after
+
+        node_html = node_ui.render_node_detail("nas-1", hours=24)
+        assert "Acknowledged warnings" in node_html
+        assert "Restore warning" in node_html
+        assert "CPU load is consistently heavy" in node_html

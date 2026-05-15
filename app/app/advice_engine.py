@@ -68,6 +68,28 @@ def _safe_id(s: str) -> str:
     s = re.sub(r"_+", "_", s).strip("_")
     return s[:80] or "unknown"
 
+
+def _is_synology_dsm(payload: Dict[str, Any]) -> bool:
+    capabilities = payload.get("capabilities")
+    if isinstance(capabilities, dict) and bool(capabilities.get("synology_dsm")):
+        return True
+
+    facts = payload.get("facts")
+    if isinstance(facts, dict):
+        platform = str(facts.get("platform") or facts.get("os") or facts.get("os_name") or "").strip().lower()
+        if "synology" in platform or "dsm" in platform:
+            return True
+
+    metrics = payload.get("metrics")
+    if isinstance(metrics, dict):
+        ex = metrics.get("extensions")
+        if isinstance(ex, dict):
+            platform = str(ex.get("platform") or ex.get("os") or ex.get("os_name") or "").strip().lower()
+            if "synology" in platform or "dsm" in platform:
+                return True
+
+    return False
+
 def _linear_slope_pct_per_day(points: List[Tuple[datetime, float]]) -> Optional[float]:
     """
     Least-squares slope on (t_days, pct). Returns pct/day.
@@ -351,6 +373,7 @@ def build_advice_and_health(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any
     node = payload.get("node", "unknown")
     facts = payload.get("facts", {}) if isinstance(payload.get("facts"), dict) else {}
     metrics = payload.get("metrics", {}) if isinstance(payload.get("metrics"), dict) else {}
+    is_synology = _is_synology_dsm(payload)
 
     advice: List[Dict[str, Any]] = []
     reasons: List[Dict[str, Any]] = []
@@ -546,20 +569,56 @@ def build_advice_and_health(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any
 
         if load_series and isinstance(cores, int) and cores > 0:
             load_med = _median(load_series)
-            if load_med is not None and load_med > float(cores) * 0.85:
-                _add(
-                    advice, reasons,
-                    id="cpu_load_sustained",
-                    node=node,
-                    category="cpu",
-                    severity="warn",
-                    message=f"CPU load is consistently heavy (median {load_med:.2f} on {cores} cores over ~{H_SUSTAIN_HOURS}h).",
-                    recommendation="Consider moving workloads, scheduling batch jobs, or upgrading CPU if this is typical.",
-                    confidence=0.65,
-                    field="history(metrics.cpu_load_1m)",
-                    value=load_med,
-                    evidence={"median_cpu_load_1m": load_med, "cpu_cores": cores, "window_hours": H_SUSTAIN_HOURS},
-                )
+            if load_med is not None:
+                # TODO: allow per-node CPU warning thresholds in Brain config
+                # so large NAS boxes, hypervisors, and build servers can tune
+                # sustained load advice without changing the shared defaults.
+                warn_threshold = float(cores) * (1.25 if cores <= 2 else 0.85)
+                info_threshold = float(cores) * 1.0 if (is_synology or cores <= 2) else None
+
+                if is_synology or cores <= 2:
+                    if load_med >= warn_threshold:
+                        _add(
+                            advice, reasons,
+                            id="cpu_load_sustained",
+                            node=node,
+                            category="cpu",
+                            severity="warn",
+                            message=f"CPU load is consistently heavy (median {load_med:.2f} on {cores} cores over ~{H_SUSTAIN_HOURS}h).",
+                            recommendation="Consider moving workloads, scheduling batch jobs, or upgrading CPU if this is typical.",
+                            confidence=0.65,
+                            field="history(metrics.cpu_load_1m)",
+                            value=load_med,
+                            evidence={"median_cpu_load_1m": load_med, "cpu_cores": cores, "window_hours": H_SUSTAIN_HOURS},
+                        )
+                    elif load_med >= float(cores) * 0.85 or load_med >= (info_threshold or float(cores)):
+                        _add(
+                            advice, reasons,
+                            id="cpu_load_sustained",
+                            node=node,
+                            category="cpu",
+                            severity="info",
+                            message=f"CPU load is consistently elevated (median {load_med:.2f} on {cores} cores over ~{H_SUSTAIN_HOURS}h).",
+                            recommendation="This can be normal on Synology or other low-core systems; keep an eye on it if it grows.",
+                            confidence=0.55,
+                            field="history(metrics.cpu_load_1m)",
+                            value=load_med,
+                            evidence={"median_cpu_load_1m": load_med, "cpu_cores": cores, "window_hours": H_SUSTAIN_HOURS},
+                        )
+                elif load_med > float(cores) * 0.85:
+                    _add(
+                        advice, reasons,
+                        id="cpu_load_sustained",
+                        node=node,
+                        category="cpu",
+                        severity="warn",
+                        message=f"CPU load is consistently heavy (median {load_med:.2f} on {cores} cores over ~{H_SUSTAIN_HOURS}h).",
+                        recommendation="Consider moving workloads, scheduling batch jobs, or upgrading CPU if this is typical.",
+                        confidence=0.65,
+                        field="history(metrics.cpu_load_1m)",
+                        value=load_med,
+                        evidence={"median_cpu_load_1m": load_med, "cpu_cores": cores, "window_hours": H_SUSTAIN_HOURS},
+                    )
 
     # -----------------------------
     # HISTORY: per-disk forecasting + headroom (worst 1–2 only)
